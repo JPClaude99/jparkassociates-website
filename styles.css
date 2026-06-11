@@ -135,12 +135,17 @@ a { color: inherit; }
   display: grid;
   place-items: center;
   background: var(--navy-950);
+  /* Isolate per-frame style/layout invalidation to the stage */
+  contain: layout paint;
 }
 .cinematic canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  /* Own compositing layer: the color grade (CSS filter, set from the
+     scrub config in JS) and frame blits stay off the page raster */
+  will-change: transform;
 }
 .cinematic .vignette {
   position: absolute;
@@ -239,7 +244,12 @@ a { color: inherit; }
 .gold-progress span {
   display: block;
   height: 100%;
-  width: 0%;
+  width: 100%;
+  /* Scrubbed via transform (compositor-only) — animating width here
+     invalidated layout on every scroll frame */
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  will-change: transform;
   background: var(--gold-500);
   box-shadow: 0 0 14px rgba(201, 168, 76, 0.8);
 }
