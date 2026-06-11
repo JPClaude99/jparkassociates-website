@@ -36,7 +36,9 @@ function initScrub(cfg) {
     else { dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2; }
     ctx.fillStyle = bgFill;
     ctx.fillRect(0, 0, cw, ch);
+    if (cfg.filter) ctx.filter = cfg.filter;
     ctx.drawImage(img, dx, dy, dw, dh);
+    if (cfg.filter) ctx.filter = "none";
   }
 
   function resize() {
@@ -175,23 +177,109 @@ function initStressTest() {
     });
   });
 
-  /* Email form — UI + validation only; submit handler is a stub to be
-     connected to Netlify Forms / Formspree / an ESP before launch. */
+  /* Stress-test email capture — submits to Web3Forms.
+     Register jasonpark@jparkassociates.com at web3forms.com, copy the
+     access_key here and into #contact-form below. */
+  const WEB3_KEY = "REPLACE_WITH_WEB3FORMS_ACCESS_KEY";
   const form = document.getElementById("stress-email-form");
-  const email = document.getElementById("sr-email");
+  const emailInput = document.getElementById("sr-email");
   const msg = document.getElementById("sr-msg");
-  form.addEventListener("submit", (e) => {
+  const submitBtn = form.querySelector("button[type='submit']");
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const value = email.value.trim();
+    const value = emailInput.value.trim();
     if (!value || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
       msg.textContent = "That email doesn't look right — mind checking it?";
       msg.className = "form-msg err";
-      email.focus();
+      emailInput.focus();
       return;
     }
-    msg.textContent = "Noted — the full breakdown will be on its way once email delivery is connected.";
-    msg.className = "form-msg ok";
-    form.reset();
+    const score = answers.filter((a) => a === "no").length;
+    const band = BANDS.find((b) => score <= b.max);
+    submitBtn.disabled = true;
+    msg.textContent = "Sending…";
+    msg.className = "form-msg";
+    try {
+      const res = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          access_key: WEB3_KEY,
+          subject: "Stress test result — jparkassociates.com",
+          from_name: "Stress Test Form",
+          email: value,
+          cc: "justinparkcpa@gmail.com",
+          message: `Result: ${band.title}\nScore: ${score}/5 “no” answers\n\nSend breakdown to: ${value}`
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        msg.textContent = "Got it — look for a message from jasonpark@jparkassociates.com, usually within one business day.";
+        msg.className = "form-msg ok";
+        form.reset();
+      } else {
+        throw new Error(data.message);
+      }
+    } catch {
+      msg.textContent = "Something went wrong — please email jasonpark@jparkassociates.com directly.";
+      msg.className = "form-msg err";
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+/* ---------- Contact form ---------- */
+function initContactForm() {
+  const form = document.getElementById("contact-form");
+  if (!form) return;
+  const WEB3_KEY = "REPLACE_WITH_WEB3FORMS_ACCESS_KEY";
+  const msg = document.getElementById("cf-msg");
+  const submitBtn = form.querySelector("button[type='submit']");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const emailEl = form.querySelector("#cf-email");
+    const emailVal = emailEl ? emailEl.value.trim() : "";
+    if (!emailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) {
+      msg.textContent = "Please include a valid email so we can reach you.";
+      msg.className = "form-msg err";
+      if (emailEl) emailEl.focus();
+      return;
+    }
+    submitBtn.disabled = true;
+    msg.textContent = "Sending…";
+    msg.className = "form-msg";
+    const nameEl = form.querySelector("#cf-name");
+    const phoneEl = form.querySelector("#cf-phone");
+    const messageEl = form.querySelector("#cf-message");
+    try {
+      const res = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          access_key: WEB3_KEY,
+          subject: "New inquiry — jparkassociates.com",
+          from_name: nameEl ? nameEl.value.trim() || "Website visitor" : "Website visitor",
+          email: emailVal,
+          cc: "justinparkcpa@gmail.com",
+          phone: phoneEl ? phoneEl.value.trim() : "",
+          message: messageEl ? messageEl.value.trim() : ""
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        msg.textContent = "Message sent — you’ll hear from jasonpark@jparkassociates.com within one business day.";
+        msg.className = "form-msg ok";
+        form.reset();
+      } else {
+        throw new Error(data.message);
+      }
+    } catch {
+      msg.textContent = "Something went wrong — please email jasonpark@jparkassociates.com directly.";
+      msg.className = "form-msg err";
+    } finally {
+      submitBtn.disabled = false;
+    }
   });
 }
 
@@ -264,4 +352,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initPainNavigator();
   initStressTest();
+  initContactForm();
 });
