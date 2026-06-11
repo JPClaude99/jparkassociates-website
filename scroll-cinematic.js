@@ -5,6 +5,55 @@
    ============================================================ */
 
 /* ---------- Frame-scrub sections ---------- */
+
+/* Frames decode off the main thread only when createImageBitmap is fed
+   a Blob — createImageBitmap(<img>) decodes synchronously on the main
+   thread in Chrome (~12 ms per 1920x1080 frame, measured). So we keep
+   compressed Blobs (~55 KB each, ~20 MB for all 362) and decode a
+   sliding window of them into ImageBitmaps as the user scrolls. */
+const USE_BITMAPS = typeof createImageBitmap === "function" && typeof fetch === "function";
+
+/* Shared frame loader: priority queue with limited concurrency.
+   Firing 362 requests at once lets HTTP/2 multiplex them all, so every
+   frame trickles in together and none completes early; a small
+   concurrent window makes frames complete progressively instead. */
+const frameLoader = (() => {
+  const queue = [];
+  let active = 0;
+  const MAX_CONCURRENT = 8;
+  function pump() {
+    while (active < MAX_CONCURRENT && queue.length) {
+      const job = queue.shift();
+      active++;
+      const settle = (result) => {
+        active--;
+        job.cb(result || null);
+        pump();
+      };
+      if (USE_BITMAPS) {
+        fetch(job.src)
+          .then((r) => (r.ok ? r.blob() : null))
+          .then(settle)
+          .catch(() => settle(null));
+      } else {
+        /* Legacy path: plain images, drawn directly (pre-2021 browsers) */
+        const img = new Image();
+        img.decoding = "async";
+        img.onload = () => { img.onload = img.onerror = null; settle(img); };
+        img.onerror = () => { img.onload = img.onerror = null; settle(null); };
+        img.src = job.src;
+      }
+    }
+  }
+  return {
+    enqueue(src, cb, front) {
+      const job = { src, cb };
+      if (front) queue.unshift(job); else queue.push(job);
+      pump();
+    }
+  };
+})();
+
 function initScrub(cfg) {
   const section = document.querySelector(cfg.section);
   const canvas = section.querySelector("canvas");
@@ -12,51 +61,133 @@ function initScrub(cfg) {
   const lines = [...section.querySelectorAll(".reveal-line")];
   const progressFill = section.querySelector(".gold-progress span");
   const bgFill = cfg.bg || "#111c33";
-  const images = [];
-  let firstDrawn = false;
+  const frames = []; /* Blob per frame (or <img> on the legacy path) */
+  let frameW = 0, frameH = 0; /* native frame size, known after first decode */
+  let current = -1;
+  let lastP = -1;
 
-  for (let i = 0; i < cfg.frameCount; i++) {
-    const img = new Image();
-    img.src = cfg.framePath(i + 1);
-    img.onload = () => {
-      if (!firstDrawn) { firstDrawn = true; draw(0); }
-    };
-    images[i] = img;
+  /* The color grade lives on the element as a GPU-composited CSS filter.
+     ctx.filter ran the same math on the CPU for every drawImage (~2x the
+     draw cost here, far worse at dpr 2). Bonus: Safari historically
+     ignored ctx.filter, so the grade now applies there too. */
+  if (cfg.filter) canvas.style.filter = cfg.filter;
+
+  /* --- Decoded-frame cache: a sliding window of ImageBitmaps. ---
+     362 frames decode to ~3 GB of RGBA, so the browser's image-decode
+     cache thrashes and drawImage(<img>) pays a ~15 ms synchronous
+     main-thread decode on every cache miss — the main jank source.
+     createImageBitmap(blob) decodes on a worker thread, so we keep a
+     window of decoded bitmaps around the current frame and the hot path
+     only ever draws already-decoded pixels. */
+  const RANGE = navigator.deviceMemory && navigator.deviceMemory <= 4 ? 8 : 14;
+  const bitmaps = new Map();
+  const decoding = new Set();
+
+  function decodeIdx(i) {
+    if (i < 0 || i >= cfg.frameCount) return;
+    if (bitmaps.has(i) || decoding.has(i) || !frames[i]) return;
+    decoding.add(i);
+    createImageBitmap(frames[i]).then((bm) => {
+      decoding.delete(i);
+      if (!frameW) {
+        frameW = bm.width;
+        frameH = bm.height;
+        resize(); /* apply the source-capped dpr now that dims are known */
+      }
+      if (Math.abs(i - current) > RANGE + 2) { bm.close(); return; }
+      bitmaps.set(i, bm);
+      if (i === current) draw(current); /* upgrade a nearest-frame fallback draw */
+    }).catch(() => decoding.delete(i));
   }
 
-  let current = -1;
+  function ensureDecoded(center) {
+    if (!USE_BITMAPS) return;
+    for (const [i, bm] of bitmaps) {
+      if (Math.abs(i - center) > RANGE + 2) { bm.close(); bitmaps.delete(i); }
+    }
+    for (let d = 0; d <= RANGE; d++) {
+      decodeIdx(center + d);
+      if (d) decodeIdx(center - d);
+    }
+  }
+
+  function releaseBitmaps() {
+    for (const bm of bitmaps.values()) bm.close();
+    bitmaps.clear();
+  }
+
+  /* Best available source for a frame: the exact decoded bitmap, else
+     the nearest decoded one (temporally coherent and instant). While the
+     window catches up after a long jump the canvas simply keeps its last
+     frame — same as the old engine while a frame was still loading. */
+  function sourceFor(index) {
+    if (USE_BITMAPS) {
+      const exact = bitmaps.get(index);
+      if (exact) return exact;
+      for (let d = 1; d <= RANGE; d++) {
+        const a = bitmaps.get(index + d);
+        if (a) return a;
+        const b = bitmaps.get(index - d);
+        if (b) return b;
+      }
+      return null;
+    }
+    for (let d = 0; d < cfg.frameCount; d++) {
+      const a = frames[index + d], b = frames[index - d];
+      if (a && a.complete && a.naturalWidth) return a;
+      if (b && b.complete && b.naturalWidth) return b;
+    }
+    return null;
+  }
 
   function draw(index) {
-    const img = images[index];
-    if (!img || !img.complete || !img.naturalWidth) return;
+    const src = sourceFor(index);
+    if (!src) return;
+    const iw = src.naturalWidth || src.width, ih = src.naturalHeight || src.height;
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    const ir = img.naturalWidth / img.naturalHeight, cr = cw / ch;
+    const ir = iw / ih, cr = cw / ch;
     let dw, dh, dx, dy;
     if (ir > cr) { dh = ch; dw = ch * ir; dx = (cw - dw) / 2; dy = 0; }
     else { dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2; }
     ctx.fillStyle = bgFill;
     ctx.fillRect(0, 0, cw, ch);
-    if (cfg.filter) ctx.filter = cfg.filter;
-    ctx.drawImage(img, dx, dy, dw, dh);
-    if (cfg.filter) ctx.filter = "none";
+    ctx.drawImage(src, dx, dy, dw, dh);
   }
 
   function resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = canvas.clientHeight * dpr;
+    /* Cap the backing store at what the 1920x1080 source can actually
+       feed: under cover-fit the source detail on screen is
+       min(frameW/cssW, frameH/cssH) px per CSS px, so any dpr above
+       that only multiplies GPU fill and memory (a dpr-2 laptop was
+       pushing a 3840x2160 backing store for a 1920px source) without
+       adding a single pixel of real detail. */
+    const cssW = canvas.clientWidth || 1, cssH = canvas.clientHeight || 1;
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (frameW && frameH) dpr = Math.min(dpr, Math.min(frameW / cssW, frameH / cssH));
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     draw(current < 0 ? 0 : current);
   }
 
   function update() {
     const rect = section.getBoundingClientRect();
-    if (rect.bottom < -window.innerHeight || rect.top > window.innerHeight) return;
-    const scrollable = rect.height - window.innerHeight;
+    const vh = window.innerHeight;
+    /* Far away: free the decoded window (it rebuilds on approach). */
+    if (rect.bottom < -vh * 2 || rect.top > vh * 2) {
+      if (bitmaps.size) releaseBitmaps();
+      return;
+    }
+    const scrollable = rect.height - vh;
     const p = Math.min(Math.max(-rect.top / scrollable, 0), 1);
     const idx = Math.min(cfg.frameCount - 1, Math.floor(p * (cfg.frameCount - 1)));
     if (idx !== current) { current = idx; draw(idx); }
-    if (progressFill) progressFill.style.width = (p * 100).toFixed(2) + "%";
+    ensureDecoded(idx); /* keeps the decode window warm as frames load / scroll moves */
+    if (p === lastP) return; /* nothing visual changed — skip all style writes */
+    lastP = p;
+    /* scaleX instead of width: width invalidated layout every frame, which
+       turned the getBoundingClientRect reads above into forced reflows. */
+    if (progressFill) progressFill.style.transform = `scaleX(${p.toFixed(4)})`;
     for (const el of lines) {
       const a = parseFloat(el.dataset.in), b = parseFloat(el.dataset.out);
       const mid = (a + b) / 2, half = (b - a) / 2;
@@ -69,6 +200,28 @@ function initScrub(cfg) {
       el.style.transform = `translate(-50%, -50%) translateY(${(1 - o) * 26}px)`;
       el.style.pointerEvents = o > 0.5 ? "auto" : "none";
     }
+  }
+
+  /* Stride order: cover the whole scrub range coarsely first, then fill
+     in. A fast first scroll finds frames spread across the section (the
+     nearest-frame fallback bridges the gaps) instead of a frozen canvas. */
+  const seq = [];
+  const seen = new Set();
+  for (const stride of [16, 4, 1]) {
+    for (let i = 0; i < cfg.frameCount; i += stride) {
+      if (!seen.has(i)) { seen.add(i); seq.push(i); }
+    }
+  }
+  for (const i of seq) {
+    frameLoader.enqueue(cfg.framePath(i + 1), (result) => {
+      if (!result) return;
+      frames[i] = result;
+      if (!USE_BITMAPS && !frameW && result.naturalWidth) {
+        frameW = result.naturalWidth;
+        frameH = result.naturalHeight;
+        resize(); /* legacy path: apply the source-capped dpr, paint frame 0 */
+      }
+    }, i === 0);
   }
 
   window.addEventListener("resize", resize);
@@ -344,10 +497,15 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   document.querySelectorAll(".reveal, .stat-num").forEach((el) => io.observe(el));
 
+  /* Scroll hint — this fires on every Lenis scroll tick, so cache the
+     nodes and only write when the visibility state actually flips. */
+  const hints = [...document.querySelectorAll(".scroll-hint")];
+  let hintsHidden = null;
   lenis.on("scroll", ({ scroll }) => {
-    document.querySelectorAll(".scroll-hint").forEach((h) => {
-      h.style.opacity = scroll > 60 ? "0" : "1";
-    });
+    const hide = scroll > 60;
+    if (hide === hintsHidden) return;
+    hintsHidden = hide;
+    hints.forEach((h) => { h.style.opacity = hide ? "0" : "1"; });
   });
 
   initPainNavigator();
