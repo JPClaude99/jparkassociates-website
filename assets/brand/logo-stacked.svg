@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 1080">
+  <circle cx="650" cy="290" r="262" fill="#1B2A4A"/>
+  <circle cx="650" cy="290" r="237" fill="none" stroke="#C9A84C" stroke-width="5"/>
+  <text x="650" y="312" text-anchor="middle" dominant-baseline="central"
+        font-family="Playfair Display Black" font-size="278" fill="#F5F0E8" letter-spacing="-8">JP</text>
+  <text x="650" y="760" text-anchor="middle" font-family="Playfair Display Bold" font-size="96" fill="#1B2A4A" letter-spacing="2">J PARK &amp; ASSOCIATES</text>
+  <rect x="510" y="812" width="280" height="4" fill="#C9A84C"/>
+  <text x="650" y="884" text-anchor="middle" font-family="Liberation Sans" font-size="30" fill="#5C6577" letter-spacing="9">CERTIFIED PUBLIC ACCOUNTANTS</text>
+</svg>

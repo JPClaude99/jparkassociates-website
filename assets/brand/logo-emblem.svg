@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <circle cx="500" cy="500" r="500" fill="#1B2A4A"/>
+  <circle cx="500" cy="500" r="452" fill="none" stroke="#C9A84C" stroke-width="7"/>
+  <text x="500" y="512" text-anchor="middle" dominant-baseline="central"
+        font-family="Playfair Display Black" font-size="430" fill="#F5F0E8" letter-spacing="-10">JP</text>
+  <rect x="392" y="730" width="216" height="5" fill="#C9A84C"/>
+  <text x="500" y="800" text-anchor="middle" dominant-baseline="central"
+        font-family="Liberation Sans" font-weight="bold" font-size="60" fill="#C9A84C" letter-spacing="14">&amp; ASSOC.</text>
+</svg>
