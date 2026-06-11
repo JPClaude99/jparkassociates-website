@@ -167,6 +167,11 @@ function initScrub(cfg) {
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    /* Paint the section's navy immediately — an alpha:false canvas is
+       opaque black until first draw, which read as a dead-black flash
+       before frame 1 decoded (and after any resize mid-catchup). */
+    ctx.fillStyle = bgFill;
+    ctx.fillRect(0, 0, cssW, cssH);
     draw(current < 0 ? 0 : current);
   }
 
@@ -232,6 +237,10 @@ function initScrub(cfg) {
 /* ---------- Stat counters ---------- */
 function animateCount(el) {
   const target = parseFloat(el.dataset.count), suffix = el.dataset.suffix || "";
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    el.textContent = target + suffix;
+    return;
+  }
   const dur = 1500, t0 = performance.now();
   function step(t) {
     const k = Math.min((t - t0) / dur, 1), eased = 1 - Math.pow(1 - k, 3);
@@ -315,6 +324,17 @@ function initStressTest() {
     requestAnimationFrame(() => {
       meter.style.width = Math.max(8, (score / questions.length) * 100) + "%";
     });
+    /* If the last answer was clicked mid-list, the result renders below
+       the fold — bring its heading into view so it isn't missed. */
+    const rect = result.getBoundingClientRect();
+    if (rect.top > window.innerHeight - 160) {
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (window.__lenis && !reduced) {
+        window.__lenis.scrollTo(result, { offset: -window.innerHeight * 0.3, duration: 0.9 });
+      } else {
+        result.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+      }
+    }
   }
 
   questions.forEach((q, i) => {
@@ -344,9 +364,11 @@ function initStressTest() {
     if (!value || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
       msg.textContent = "That email doesn't look right — mind checking it?";
       msg.className = "form-msg err";
+      emailInput.setAttribute("aria-invalid", "true");
       emailInput.focus();
       return;
     }
+    emailInput.removeAttribute("aria-invalid");
     const score = answers.filter((a) => a === "no").length;
     const band = BANDS.find((b) => score <= b.max);
     submitBtn.disabled = true;
@@ -396,9 +418,13 @@ function initContactForm() {
     if (!emailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) {
       msg.textContent = "Please include a valid email so we can reach you.";
       msg.className = "form-msg err";
-      if (emailEl) emailEl.focus();
+      if (emailEl) {
+        emailEl.setAttribute("aria-invalid", "true");
+        emailEl.focus();
+      }
       return;
     }
+    if (emailEl) emailEl.removeAttribute("aria-invalid");
     submitBtn.disabled = true;
     msg.textContent = "Sending…";
     msg.className = "form-msg";
@@ -459,27 +485,32 @@ document.addEventListener("DOMContentLoaded", () => {
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const navUpdate = initNavTheme();
 
-  const lenis = new Lenis({
-    lerp: reducedMotion ? 1 : 0.085,
-    smoothWheel: !reducedMotion
-  });
+  /* Lenis is self-hosted, but if it ever fails to load the site must
+     degrade to native scrolling — not lose every interaction below. */
+  const lenis = typeof Lenis === "function"
+    ? new Lenis({ lerp: reducedMotion ? 1 : 0.085, smoothWheel: !reducedMotion })
+    : null;
   window.__lenis = lenis;
 
   function raf(t) {
-    lenis.raf(t);
+    if (lenis) lenis.raf(t);
     scrubs.forEach((s) => s.update());
     navUpdate();
     requestAnimationFrame(raf);
   }
   requestAnimationFrame(raf);
 
-  /* Anchor links → smooth scroll via Lenis */
+  /* Anchor links → smooth scroll via Lenis (native smooth as fallback) */
   document.querySelectorAll('a[href^="#"]').forEach((a) => {
     a.addEventListener("click", (e) => {
       const target = document.querySelector(a.getAttribute("href"));
       if (!target) return;
       e.preventDefault();
-      lenis.scrollTo(target, { offset: 0, duration: reducedMotion ? 0 : 1.4 });
+      if (lenis) {
+        lenis.scrollTo(target, { offset: 0, duration: reducedMotion ? 0 : 1.4 });
+      } else {
+        target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth" });
+      }
     });
   });
 
@@ -501,12 +532,17 @@ document.addEventListener("DOMContentLoaded", () => {
      nodes and only write when the visibility state actually flips. */
   const hints = [...document.querySelectorAll(".scroll-hint")];
   let hintsHidden = null;
-  lenis.on("scroll", ({ scroll }) => {
+  const updateHints = (scroll) => {
     const hide = scroll > 60;
     if (hide === hintsHidden) return;
     hintsHidden = hide;
     hints.forEach((h) => { h.style.opacity = hide ? "0" : "1"; });
-  });
+  };
+  if (lenis) {
+    lenis.on("scroll", ({ scroll }) => updateHints(scroll));
+  } else {
+    window.addEventListener("scroll", () => updateHints(window.scrollY), { passive: true });
+  }
 
   initPainNavigator();
   initStressTest();
