@@ -156,8 +156,8 @@ a { color: inherit; }
     linear-gradient(180deg, rgba(10, 16, 30, 0.5) 0%, transparent 24%, transparent 72%, rgba(10, 16, 30, 0.65) 100%);
 }
 
-#hero { height: 520vh; }
-#order { height: 440vh; }
+#hero { height: 312vh; }
+#order { height: 264vh; }
 
 .overlay { position: relative; z-index: 10; width: 100%; text-align: center; padding: 0 24px; }
 .reveal-line {
@@ -742,6 +742,6 @@ a { color: inherit; }
 @media (max-width: 760px) {
   .nav .logo { height: 38px; }
   .industry-grid { grid-template-columns: 1fr; }
-  #hero { height: 420vh; }
-  #order { height: 360vh; }
+  #hero { height: 252vh; }
+  #order { height: 216vh; }
 }
