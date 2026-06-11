@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=2" />
+  <link rel="stylesheet" href="styles.css?v=3" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -32,7 +32,13 @@
     },
     "areaServed": ["La Crescenta", "Los Angeles"],
     "telephone": "+1-818-248-1580",
-    "email": "jasonpark@jparkassociates.com"
+    "email": "jasonpark@jparkassociates.com",
+    "openingHoursSpecification": {
+      "@type": "OpeningHoursSpecification",
+      "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday"],
+      "opens": "09:00",
+      "closes": "17:30"
+    }
   }
   </script>
 </head>
@@ -365,7 +371,41 @@
         <a class="btn btn-gold" href="#stress-test">Run the 2-minute stress test</a>
         <a class="btn btn-ghost-light" href="mailto:jasonpark@jparkassociates.com?subject=15-minute%20conversation">Book a 15-minute call</a>
       </div>
-      <p class="quiet reveal" data-delay="3">Prefer to talk it through? <a href="tel:+18182481580">(818) 248-1580</a> &nbsp;&middot;&nbsp; <a href="mailto:jasonpark@jparkassociates.com">jasonpark@jparkassociates.com</a></p>
+      <div class="contact-divider reveal" data-delay="3" aria-hidden="true">
+        <span>or send us a message</span>
+      </div>
+
+      <form class="contact-form reveal" id="contact-form" novalidate data-delay="3">
+        <input type="hidden" name="access_key" value="REPLACE_WITH_WEB3FORMS_ACCESS_KEY" />
+        <input type="hidden" name="subject" value="New inquiry — jparkassociates.com" />
+        <input type="hidden" name="from_name" value="Website Contact Form" />
+        <input type="hidden" name="cc" value="justinparkcpa@gmail.com" />
+        <div class="cf-row">
+          <div class="cf-group">
+            <label for="cf-name">Name</label>
+            <input type="text" id="cf-name" name="name" placeholder="Jane Smith" autocomplete="name" />
+          </div>
+          <div class="cf-group">
+            <label for="cf-email">Email</label>
+            <input type="email" id="cf-email" name="email" placeholder="jane@yourbusiness.com" autocomplete="email" required />
+          </div>
+        </div>
+        <div class="cf-group">
+          <label for="cf-phone">Phone <span class="opt">(optional)</span></label>
+          <input type="tel" id="cf-phone" name="phone" placeholder="(818) 555-0100" autocomplete="tel" />
+        </div>
+        <div class="cf-group">
+          <label for="cf-message">What&rsquo;s going on?</label>
+          <textarea id="cf-message" name="message" rows="4" placeholder="Tell us about your business and where the friction is — books, tax, payroll, or all of the above."></textarea>
+        </div>
+        <div class="cf-actions">
+          <button type="submit" class="btn btn-gold">Send message</button>
+          <span class="form-msg cf-msg" id="cf-msg" role="status"></span>
+        </div>
+        <p class="cf-note">Goes directly to <strong>jasonpark@jparkassociates.com</strong> &mdash; we typically reply within one business day.</p>
+      </form>
+
+      <p class="quiet reveal" data-delay="4">Prefer to talk it through? <a href="tel:+18182481580">(818) 248-1580</a> &nbsp;&middot;&nbsp; Mon&ndash;Fri, 9 AM&ndash;5:30 PM</p>
     </div>
   </section>
 
@@ -380,6 +420,7 @@
         <h4>Visit</h4>
         <p>2529 Foothill Blvd. Ste 101<br />La Crescenta, CA 91214</p>
         <p><a href="tel:+18182481580">(818) 248-1580</a></p>
+        <p>Mon&ndash;Fri &middot; 9 AM &ndash; 5:30 PM</p>
       </div>
       <div>
         <h4>Reach us</h4>
@@ -404,16 +445,18 @@
         section: "#hero",
         frameCount: 181,
         bg: "#111c33",
+        filter: "brightness(1.04) contrast(1.09) saturate(1.15)",
         framePath: (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp`
       },
       {
         section: "#order",
         frameCount: 181,
         bg: "#111c33",
+        filter: "brightness(1.02) contrast(1.06) saturate(1.08)",
         framePath: (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp`
       }
     ];
   </script>
-  <script src="scroll-cinematic.js?v=2"></script>
+  <script src="scroll-cinematic.js?v=3"></script>
 </body>
 </html>
