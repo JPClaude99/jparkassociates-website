@@ -65,6 +65,7 @@ function initScrub(cfg) {
   let frameW = 0, frameH = 0; /* native frame size, known after first decode */
   let current = -1;
   let lastP = -1;
+  let fallbackIdx = -1; /* index of the last-drawn frame; protected from eviction */
 
   /* The color grade lives on the element as a GPU-composited CSS filter.
      ctx.filter ran the same math on the CPU for every drawImage (~2x the
@@ -103,7 +104,11 @@ function initScrub(cfg) {
   function ensureDecoded(center) {
     if (!USE_BITMAPS) return;
     for (const [i, bm] of bitmaps) {
-      if (Math.abs(i - center) > RANGE + 2) { bm.close(); bitmaps.delete(i); }
+      /* Keep the fallback frame alive even if it drifts outside the window —
+         it is the last resort when a fast-scroll empties the entire cache. */
+      if (Math.abs(i - center) > RANGE + 2 && i !== fallbackIdx) {
+        bm.close(); bitmaps.delete(i);
+      }
     }
     for (let d = 0; d <= RANGE; d++) {
       decodeIdx(center + d);
@@ -114,44 +119,57 @@ function initScrub(cfg) {
   function releaseBitmaps() {
     for (const bm of bitmaps.values()) bm.close();
     bitmaps.clear();
+    fallbackIdx = -1;
   }
 
-  /* Best available source for a frame: the exact decoded bitmap, else
-     the nearest decoded one (temporally coherent and instant). While the
-     window catches up after a long jump the canvas simply keeps its last
-     frame — same as the old engine while a frame was still loading. */
+  /* Best available source for a frame. Returns [bitmap, frameIndex] or null.
+     Search order: exact match → nearest decoded → protected fallback (last
+     successfully drawn frame, kept alive through eviction so a fast-scroll
+     decode catch-up never leaves the canvas blank). */
   function sourceFor(index) {
     if (USE_BITMAPS) {
-      const exact = bitmaps.get(index);
-      if (exact) return exact;
+      if (bitmaps.has(index)) return [bitmaps.get(index), index];
       for (let d = 1; d <= RANGE; d++) {
-        const a = bitmaps.get(index + d);
-        if (a) return a;
-        const b = bitmaps.get(index - d);
-        if (b) return b;
+        const i1 = index + d;
+        if (bitmaps.has(i1)) return [bitmaps.get(i1), i1];
+        const i2 = index - d;
+        if (bitmaps.has(i2)) return [bitmaps.get(i2), i2];
       }
+      if (fallbackIdx >= 0 && bitmaps.has(fallbackIdx)) return [bitmaps.get(fallbackIdx), fallbackIdx];
       return null;
     }
     for (let d = 0; d < cfg.frameCount; d++) {
       const a = frames[index + d], b = frames[index - d];
-      if (a && a.complete && a.naturalWidth) return a;
-      if (b && b.complete && b.naturalWidth) return b;
+      if (a && a.complete && a.naturalWidth) return [a, index + d];
+      if (b && b.complete && b.naturalWidth) return [b, index - d];
     }
     return null;
   }
 
   function draw(index) {
-    const src = sourceFor(index);
-    if (!src) return;
+    const hit = sourceFor(index);
+    if (!hit) return;
+    const [src, srcIdx] = hit;
     const iw = src.naturalWidth || src.width, ih = src.naturalHeight || src.height;
+    if (!iw || !ih) return;
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    if (!cw || !ch) return;
     const ir = iw / ih, cr = cw / ch;
     let dw, dh, dx, dy;
-    if (ir > cr) { dh = ch; dw = ch * ir; dx = (cw - dw) / 2; dy = 0; }
-    else { dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2; }
+    if (ch > cw && ir > 1) {
+      /* Portrait canvas + landscape frame: fit by width so the full frame
+         is visible (ring/subject intact). Navy fill above/below is covered
+         by the mobile vignette (--cine-blend-top/bot set in resize). */
+      dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2;
+    } else if (ir > cr) {
+      dh = ch; dw = ch * ir; dx = (cw - dw) / 2; dy = 0;
+    } else {
+      dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2;
+    }
     ctx.fillStyle = bgFill;
     ctx.fillRect(0, 0, cw, ch);
     ctx.drawImage(src, dx, dy, dw, dh);
+    fallbackIdx = srcIdx; /* pin: survives the next ensureDecoded eviction pass */
   }
 
   function resize() {
@@ -167,6 +185,15 @@ function initScrub(cfg) {
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    /* On portrait mobile + landscape frame, publish the frame's vertical
+       position so the CSS vignette gradient can blend the width-fit
+       letterbox bars seamlessly into the section's navy background. */
+    if (frameW && frameH && cssH > cssW && frameW > frameH) {
+      const fh = cssW / (frameW / frameH);
+      const fy = (cssH - fh) / 2;
+      section.style.setProperty('--cine-blend-top', (fy / cssH * 100).toFixed(1) + '%');
+      section.style.setProperty('--cine-blend-bot', ((fy + fh) / cssH * 100).toFixed(1) + '%');
+    }
     /* Paint the section's navy immediately — an alpha:false canvas is
        opaque black until first draw, which read as a dead-black flash
        before frame 1 decoded (and after any resize mid-catchup). */
