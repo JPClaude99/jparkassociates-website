@@ -366,7 +366,7 @@ function initStressTest() {
   /* Stress-test email capture — submits to Web3Forms.
      Register jasonpark@jparkassociates.com at web3forms.com, copy the
      access_key here and into #contact-form below. */
-  const WEB3_KEY = "REPLACE_WITH_WEB3FORMS_ACCESS_KEY";
+  const WEB3_KEY = "f157657a-37a9-47ec-9b50-3b8960d41025";
   const form = document.getElementById("stress-email-form");
   const emailInput = document.getElementById("sr-email");
   const msg = document.getElementById("sr-msg");
@@ -421,7 +421,7 @@ function initStressTest() {
 function initContactForm() {
   const form = document.getElementById("contact-form");
   if (!form) return;
-  const WEB3_KEY = "REPLACE_WITH_WEB3FORMS_ACCESS_KEY";
+  const WEB3_KEY = "f157657a-37a9-47ec-9b50-3b8960d41025";
   const msg = document.getElementById("cf-msg");
   const submitBtn = form.querySelector("button[type='submit']");
   form.addEventListener("submit", async (e) => {
