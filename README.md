@@ -22,6 +22,11 @@ A static server is required — the frame sequences won't load from `file://`.
 | `index.html` | The whole site — copy, sections, and the `SCRUB_SECTIONS` frame config at the bottom |
 | `styles.css` | Brand design system (navy/gold/cream, Playfair Display + Inter) |
 | `scroll-cinematic.js` | Scrub engine, Lenis, reveals, pain-point navigator, stress test |
+| `blog.html` | "The Ledger" — blog index (featured post, category filter, card grid, newsletter) |
+| `blog.css` / `blog.js` | Blog styles (on top of `styles.css`) and the index renderer/filter |
+| `blog/posts.js` | Post manifest — the single source of truth the index renders from |
+| `blog/_template.html` | Article template with `{{PLACEHOLDERS}}` — the automation contract |
+| `blog/<slug>.html` | Individual articles (pure static HTML, no JS) |
 | `frames/hero/` | 181 frames — gold ring orbit (the logo's gold ring, made cinematic) |
 | `frames/order/` | 181 frames — paperwork vortex settling into a neat stack (chaos → order) |
 | `video/` | Source 1080p MP4s + keyframes (not loaded by the site; kept for re-slicing) |
@@ -46,6 +51,26 @@ A static server is required — the frame sequences won't load from `file://`.
 - Email: jasonpark@jparkassociates.com
 - Address: 2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214
 
+## The blog ("The Ledger") and the article automation
+
+The blog is designed to be fed by an announcement-tracking pipeline (IRS, CDTFA,
+FinCEN, EDD/FTB, UltraTax CS release notes). Publishing a new article is two
+mechanical steps, in this order:
+
+1. Render `blog/_template.html` with the `{{PLACEHOLDERS}}` filled (see the
+   comment block at the top of the template) and write it to `blog/<slug>.html`.
+2. Prepend a matching entry to the `window.BLOG_POSTS` array in `blog/posts.js`
+   (field reference in that file's header comment).
+
+No build step, no other files to touch — the index, featured slot, and category
+filters all derive from `posts.js`. Categories: `federal`, `california`,
+`compliance`, `payroll`, `deadlines`, `industry`.
+
+**The six seeded articles are samples written by Claude (June 2026).** They're
+realistic and sourced, but Jason should review them (especially the BOI and
+tip-deduction ones, where rules are in flux) before launch, and the pipeline
+should refresh anything stale.
+
 ## Before launch — replace these
 
 - **Office hours** (not yet on the site).
@@ -54,6 +79,10 @@ A static server is required — the frame sequences won't load from `file://`.
 - **Stress-test email form** — UI + validation only; the submit handler in
   `scroll-cinematic.js` (`initStressTest`) is a stub. Connect Netlify Forms,
   Formspree, or an ESP.
+- **Blog newsletter form** (`blog.html` / `blog.js`) — same situation: UI +
+  validation only, marked `TODO` in `blog.js`. Wire to the same ESP.
+- **Sample blog articles** — review/replace the six seeded posts (see the blog
+  section above).
 - `og:image` meta tag (a frame from `frames/hero/` works well).
 
 ## Re-slicing frames
