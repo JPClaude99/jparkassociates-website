@@ -1,0 +1,75 @@
+{
+  "_comment": "Feeds the weekly Ledger scan checks (see PIPELINE.md Step 2). 'priority': primary sources are checked every run; secondary sources are checked when time permits or when a primary item points there. All are listing pages — fetch them and look at items from the last ~10 days.",
+  "sources": [
+    {
+      "id": "irs-newsroom",
+      "name": "IRS Newsroom — news releases",
+      "url": "https://www.irs.gov/newsroom",
+      "priority": "primary",
+      "focus": "Due-date changes, disaster relief for California/LA County, new thresholds and credits for pass-throughs and small employers, scam alerts. Skip enforcement press releases and statistics."
+    },
+    {
+      "id": "irs-small-biz",
+      "name": "IRS — Small Business and Self-Employed tax center updates",
+      "url": "https://www.irs.gov/businesses/small-businesses-self-employed",
+      "priority": "secondary",
+      "focus": "Guidance changes for Schedule C / 1120-S / 1065 filers; tip reporting; payroll credits."
+    },
+    {
+      "id": "cdtfa-news",
+      "name": "CDTFA — news releases",
+      "url": "https://www.cdtfa.ca.gov/news/",
+      "priority": "primary",
+      "focus": "Sales & use tax changes, interest rates, filing extensions/relief. Restaurants, grocery, gas stations, and wholesalers all live under CDTFA rules."
+    },
+    {
+      "id": "cdtfa-special-notices",
+      "name": "CDTFA — special notices",
+      "url": "https://www.cdtfa.ca.gov/formspubs/specialnotices/",
+      "priority": "primary",
+      "focus": "The highest-signal CDTFA source: rate changes by district (check LA County cities), industry-specific rule changes, fuel tax (service stations), CRV changes (grocery)."
+    },
+    {
+      "id": "fincen-news",
+      "name": "FinCEN — news releases",
+      "url": "https://www.fincen.gov/news-room/news",
+      "priority": "primary",
+      "focus": "BOI/Corporate Transparency Act rulemaking — the blog has a standing promise to cover changes (see boi-reporting-2026-california-llcs). Also scam alerts aimed at small businesses."
+    },
+    {
+      "id": "ftb-tax-news",
+      "name": "FTB — Tax News",
+      "url": "https://www.ftb.ca.gov/about-ftb/newsroom/tax-news/index.html",
+      "priority": "primary",
+      "focus": "CA conformity to federal changes, PTET (pass-through elective tax) deadlines, LLC fee/annual tax announcements, CA-only relief."
+    },
+    {
+      "id": "edd-payroll",
+      "name": "EDD — payroll tax rates and employer news",
+      "url": "https://edd.ca.gov/en/payroll_taxes/rates_and_withholding/",
+      "priority": "primary",
+      "focus": "SDI rate (no wage cap), UI rates, DE 44 updates. Check around year-end especially."
+    },
+    {
+      "id": "dir-news",
+      "name": "CA DIR — press releases",
+      "url": "https://www.dir.ca.gov/DIRNews/",
+      "priority": "secondary",
+      "focus": "Statewide minimum wage announcements (usually July–August for the following Jan 1), sector minimums (fast food, health care), exempt salary threshold implications."
+    },
+    {
+      "id": "la-city-wages",
+      "name": "City of Los Angeles — Office of Wage Standards",
+      "url": "https://wagesla.lacity.org/",
+      "priority": "secondary",
+      "focus": "City of LA minimum wage (adjusts July 1) and hotel/airport sector wages. Pair with county/Pasadena/Glendale rates when writing local-wage articles."
+    },
+    {
+      "id": "ultratax-alerts",
+      "name": "Thomson Reuters — UltraTax CS alerts and release notes",
+      "url": "https://www.thomsonreuters.com/en-us/help/ultratax-cs.html",
+      "priority": "secondary",
+      "focus": "Only client-visible impacts: e-file system outages/openings, new document requirements, major form availability delays. Internal software changes are never article material."
+    }
+  ]
+}
