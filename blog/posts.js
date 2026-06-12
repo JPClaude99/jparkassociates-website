@@ -20,6 +20,56 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "irs-ftb-notice-guide-la-crescenta",
+    title: "Got an IRS or FTB letter? What each notice means — and what to do first",
+    excerpt: "CP14, CP2000, the collection ladder, FTB demands — a La Crescenta CPA's plain-English decoder for tax notices, plus the response playbook that keeps a letter from becoming a problem.",
+    date: "2026-06-09",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 6
+  },
+  {
+    slug: "payroll-services-la-crescenta-glendale",
+    title: "Payroll for La Crescenta & Glendale small businesses: what \"handled\" actually means",
+    excerpt: "Payroll is a compliance machine with weekly deadlines and street-by-street wage rules in the Crescenta Valley. What a managed payroll service must include — and the failure modes that cost real money.",
+    date: "2026-06-04",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 6
+  },
+  {
+    slug: "bookkeeping-crescenta-valley-diy-or-cpa",
+    title: "Bookkeeping for Crescenta Valley businesses: DIY, bookkeeper, or CPA?",
+    excerpt: "Every owner starts as their own bookkeeper. The honest guide to the three tiers of bookkeeping, the five signs you've outgrown DIY, and what a monthly service should actually deliver.",
+    date: "2026-05-28",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 6
+  },
+  {
+    slug: "starting-a-business-crescenta-valley-first-90-days",
+    title: "Starting a business in the Crescenta Valley: the first 90 days, financially",
+    excerpt: "Entity, EIN, bank account, licenses, seller's permit, payroll registration, books — the financial setup sequence for La Crescenta, Montrose, and Glendale, in the order that prevents rework.",
+    date: "2026-05-22",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 7
+  },
+  {
+    slug: "tax-preparation-la-crescenta-checklist",
+    title: "Tax preparation in La Crescenta: the complete what-to-bring checklist",
+    excerpt: "What your CPA actually needs for a complete, deduction-tight return — the personal list, the business list, and the LA-County-specific documents owners forget. Works for October 15 extensions too.",
+    date: "2026-05-12",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 6
+  },
+  {
     slug: "how-to-choose-small-business-cpa-los-angeles",
     title: "How to choose a small-business CPA in Los Angeles: 10 questions that separate the good ones",
     excerpt: "Most owners pick a CPA on proximity and price, then quietly regret it every April. Ten questions that surface whether a firm will actually run your books, taxes, and deadlines — asked before you sign.",
