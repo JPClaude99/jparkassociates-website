@@ -17,6 +17,29 @@ pipeline (PIPELINE.md) should apply this when drafting.
    "CDTFA 80/80 rule", "California estimated tax 30/40/0/30", "Form 571-L".
    Served by The Ledger. These build the topical authority that lifts tier 1–2.
 
+## Current campaign focus: "CPA La Crescenta" (set 2026-06-12)
+
+Until further notice, new content should preferentially serve these phrases,
+in priority order. One phrase per article; bold = has a dedicated page.
+
+| Priority | Phrase | Serving page |
+|---|---|---|
+| 1 | **CPA La Crescenta** / La Crescenta CPA | homepage (+ GBP) |
+| 2 | **small business accountant La Crescenta** | homepage + choose-a-CPA guide |
+| 3 | **tax preparation La Crescenta** | tax-prep checklist article |
+| 4 | **bookkeeping services La Crescenta / Crescenta Valley** | bookkeeping article |
+| 5 | **payroll services La Crescenta / Glendale** | payroll article |
+| 6 | **starting a business in Glendale / La Crescenta** | first-90-days article |
+| 7 | **IRS notice help / tax letter CPA** (+ local modifier) | notices article |
+| 8 | CPA Montrose / accountant Montrose CA | mention in local content; future page |
+| 9 | CPA La Cañada Flintridge / accountant Tujunga–Sunland | mention in local content; future pages |
+| 10 | restaurant accountant Los Angeles (bridge to metro tier) | tip/sales-tax articles |
+
+Adjacent-neighborhood names (Montrose, La Cañada Flintridge, Tujunga,
+Sunland, Verdugo City, Glendale, Foothill Blvd corridor) should appear
+naturally in local articles — they're how Google associates the firm with
+the whole Crescenta Valley, not just one ZIP.
+
 ## Per-article rules
 
 - **One primary query per article**, stated as a human would type it. Put it

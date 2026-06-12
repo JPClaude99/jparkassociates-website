@@ -392,6 +392,12 @@
   font-weight: 700;
   color: var(--gold-500);
 }
+.action-list a {
+  color: var(--gold-300);
+  text-decoration-color: rgba(201, 168, 76, 0.6);
+  text-underline-offset: 3px;
+}
+.action-list a:hover { color: var(--gold-500); }
 
 /* Sources + disclaimer */
 .sources-box {
