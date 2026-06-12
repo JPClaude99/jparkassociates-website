@@ -1,0 +1,68 @@
+{
+  "_comment": "Client segments for The Monthly Close (see automation/EMAILS.md). One email is drafted per active segment per month. Jason: edit freely — set active:false to skip a segment, add locations to narrow local notes, or add segments (e.g., split a segment by city) and the next run picks them up.",
+  "segments": [
+    {
+      "id": "general",
+      "label": "All small businesses",
+      "active": true,
+      "industries": [],
+      "locations": ["los-angeles-metro"],
+      "audience": "LLCs, S corps, and sole proprietors not covered by an industry segment. Broadly applicable deadlines and changes only.",
+      "spotlight_guidance": "Rotate seasonal fundamentals: estimates, books hygiene, entity housekeeping (Statement of Information), year-end planning windows."
+    },
+    {
+      "id": "restaurants",
+      "label": "Restaurants & food service",
+      "active": true,
+      "industries": ["restaurant", "food-service"],
+      "locations": ["los-angeles-metro"],
+      "audience": "Owner-operators of restaurants, cafes, and food-service businesses.",
+      "spotlight_guidance": "Tip reporting & FICA tip credit, 80/80 rule & POS tax mapping, dine-in vs to-go, local minimum wages (most exposed segment), seasonal staffing, Form 8027 season."
+    },
+    {
+      "id": "optometrists",
+      "label": "Optometrists",
+      "active": true,
+      "industries": ["optometry", "healthcare-retail"],
+      "locations": ["los-angeles-metro"],
+      "audience": "Practice owners mixing exam revenue with frame/lens retail.",
+      "spotlight_guidance": "Sales tax on the retail side, equipment purchases & Section 179 timing, insurance reimbursement bookkeeping, health-care wage rules where applicable."
+    },
+    {
+      "id": "wholesalers",
+      "label": "Wholesalers & distributors",
+      "active": true,
+      "industries": ["wholesale", "distribution"],
+      "locations": ["los-angeles-metro"],
+      "audience": "Product businesses selling for resale.",
+      "spotlight_guidance": "Resale certificates, CDTFA prepayment accounts, inventory costing & year-end counts, receivables timing, district rate changes that hit delivered sales."
+    },
+    {
+      "id": "service-stations",
+      "label": "Service station operators",
+      "active": true,
+      "industries": ["fuel", "convenience"],
+      "locations": ["los-angeles-metro"],
+      "audience": "Gas station and c-store operators.",
+      "spotlight_guidance": "Fuel excise tax and CDTFA motor-fuels notices (rates typically adjust July 1), c-store sales mix taxability, environmental/compliance fees, supplier statement reconciliation."
+    },
+    {
+      "id": "law-firms",
+      "label": "Lawyers & law firms",
+      "active": true,
+      "industries": ["legal"],
+      "locations": ["los-angeles-metro"],
+      "audience": "Solo attorneys and small firms.",
+      "spotlight_guidance": "IOLTA/trust-account discipline, partner draws & K-1 season, PTET election windows, contingency-fee income timing."
+    },
+    {
+      "id": "grocery",
+      "label": "Grocery stores & markets",
+      "active": true,
+      "industries": ["grocery", "retail-food"],
+      "locations": ["los-angeles-metro"],
+      "audience": "Independent grocers and markets.",
+      "spotlight_guidance": "Taxable vs nontaxable item mapping, CRV changes, shrinkage & inventory, department payroll, EBT/WIC bookkeeping notes."
+    }
+  ]
+}

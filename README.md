@@ -27,6 +27,12 @@ A static server is required — the frame sequences won't load from `file://`.
 | `blog/posts.js` | Post manifest — the single source of truth the index renders from |
 | `blog/_template.html` | Article template with `{{PLACEHOLDERS}}` — the automation contract |
 | `blog/<slug>.html` | Individual articles (pure static HTML, no JS) |
+| `automation/PIPELINE.md` | Playbook for the weekly announcement-scan agent (drafts Ledger articles via PR) |
+| `automation/EMAILS.md` | Playbook for the monthly client-email agent (incl. recurring deadline calendar) |
+| `automation/sources.json` | The agency feeds both agents watch (IRS, CDTFA, FinCEN, FTB, EDD, DIR…) |
+| `emails/segments.json` | Client segments (industry/location) — one Monthly Close email drafted per active segment |
+| `emails/_template.html` | Branded email template (table-based, inline styles) with `{{PLACEHOLDERS}}` |
+| `emails/drafts/YYYY-MM/` | Generated email drafts + `_SUMMARY.md` per month — review, then send manually |
 | `frames/hero/` | 181 frames — gold ring orbit (the logo's gold ring, made cinematic) |
 | `frames/order/` | 181 frames — paperwork vortex settling into a neat stack (chaos → order) |
 | `video/` | Source 1080p MP4s + keyframes (not loaded by the site; kept for re-slicing) |
@@ -70,6 +76,25 @@ filters all derive from `posts.js`. Categories: `federal`, `california`,
 realistic and sourced, but Jason should review them (especially the BOI and
 tip-deduction ones, where rules are in flux) before launch, and the pipeline
 should refresh anything stale.
+
+### The scheduled agents
+
+Two cloud routines run against this repo (manage them via `/schedule` in
+Claude Code). **Both only open PRs — nothing publishes or sends without Jason
+merging/sending.**
+
+- **Weekly announcement scan** (Mondays): follows `automation/PIPELINE.md` —
+  scans `automation/sources.json`, drafts at most 2 articles, opens a
+  `[Ledger]` PR. Most weeks it finds nothing and opens nothing.
+- **Monthly client emails** (23rd): follows `automation/EMAILS.md` — drafts
+  next month's "Monthly Close" email per active segment in
+  `emails/segments.json`, opens a `[Monthly email]` PR. Jason reviews,
+  fills real numbers flagged in `_SUMMARY.md`, and sends via his email tool
+  (no ESP is wired up; `{{UNSUBSCRIBE_URL}}` is filled at send time).
+
+Note: `emails/drafts/` is technically served by GitHub Pages like everything
+else in the repo. Drafts contain no client data — only generic deadline
+content — so this is cosmetic, but move them out of the repo if that changes.
 
 ## Before launch — replace these
 
