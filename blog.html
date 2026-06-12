@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111c33" />
+  <title>The Ledger — Small-Business Tax &amp; Accounting Updates | J Park &amp; Associates</title>
+  <meta name="description" content="Plain-English updates on tax, payroll, and compliance for Los Angeles small businesses — tracked from the IRS, CDTFA, FinCEN, and the EDD by J Park & Associates, CPAs." />
+  <meta property="og:title" content="The Ledger — by J Park & Associates" />
+  <meta property="og:description" content="What the IRS, CDTFA, and FinCEN just announced — translated into plain English for LA small-business owners." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jparkassociates.com/blog.html" />
+  <meta property="og:image" content="https://jparkassociates.com/assets/og-image.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="canonical" href="https://jparkassociates.com/blog.html" />
+  <link rel="icon" href="assets/favicon/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon/favicon-32.png" />
+  <link rel="apple-touch-icon" href="assets/favicon/apple-touch-icon-180.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600;1,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="blog.css?v=1" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Blog",
+    "name": "The Ledger",
+    "description": "Plain-English updates on tax, payroll, and compliance for Los Angeles small businesses.",
+    "url": "https://jparkassociates.com/blog.html",
+    "publisher": {
+      "@type": "AccountingService",
+      "name": "J Park & Associates",
+      "url": "https://jparkassociates.com"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <!-- ============ Fixed nav (shared with homepage) ============ -->
+  <nav class="nav" id="nav" aria-label="Main">
+    <a class="logo" href="index.html" aria-label="J Park & Associates — home">
+      <img class="logo-light" src="assets/brand/logo-horizontal-white-v2.svg" alt="J Park & Associates — Certified Public Accountants" width="2000" height="480" />
+      <img class="logo-dark" src="assets/brand/logo-horizontal-v2.svg" alt="" aria-hidden="true" width="2000" height="480" />
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html#pain">Pain points</a></li>
+      <li><a href="index.html#industries">Industries</a></li>
+      <li><a href="index.html#how">How it works</a></li>
+      <li><a href="blog.html" aria-current="page">Insights</a></li>
+      <li><a href="index.html#contact">Contact</a></li>
+    </ul>
+    <a class="btn btn-gold nav-cta" href="index.html#stress-test">
+      <span class="label-full">Run the 2-minute stress test</span>
+      <span class="label-short">2-min stress test</span>
+    </a>
+  </nav>
+
+  <!-- ============ Masthead ============ -->
+  <header class="blog-masthead">
+    <div class="container">
+      <span class="kicker">Insights from J Park &amp; Associates</span>
+      <h1>The <span class="gold-i">Ledger</span></h1>
+      <p class="tagline">What the agencies just announced — translated into plain English for small-business owners, before the deadline gets close enough to hurt.</p>
+      <p class="sources-line">Tracking <strong>IRS</strong> &middot; <strong>CDTFA</strong> &middot; <strong>FinCEN</strong> &middot; <strong>EDD &amp; FTB</strong> — so you don&rsquo;t have to</p>
+    </div>
+  </header>
+
+  <!-- ============ Category filter ============ -->
+  <div class="filter-bar" role="toolbar" aria-label="Filter articles by category">
+    <div class="container">
+      <button class="filter-chip" data-filter="all" aria-pressed="true">All</button>
+      <button class="filter-chip" data-filter="deadlines" aria-pressed="false">Deadlines</button>
+      <button class="filter-chip" data-filter="federal" aria-pressed="false">Federal Tax</button>
+      <button class="filter-chip" data-filter="california" aria-pressed="false">California &amp; CDTFA</button>
+      <button class="filter-chip" data-filter="compliance" aria-pressed="false">Compliance &amp; FinCEN</button>
+      <button class="filter-chip" data-filter="payroll" aria-pressed="false">Payroll &amp; People</button>
+      <button class="filter-chip" data-filter="industry" aria-pressed="false">Industry Guides</button>
+      <button class="filter-chip" data-filter="guides" aria-pressed="false">Owner&rsquo;s Guides</button>
+    </div>
+  </div>
+
+  <!-- ============ Articles ============ -->
+  <main class="blog-index" id="articles">
+    <div class="container">
+      <div id="featured"></div>
+      <div class="post-grid" id="post-grid"></div>
+    </div>
+  </main>
+
+  <!-- ============ Newsletter ============ -->
+  <section class="section dark-zone newsletter" aria-labelledby="nl-title">
+    <div class="container-narrow">
+      <span class="eyebrow reveal">The Monthly Close</span>
+      <h2 class="section-title reveal" id="nl-title">One email a month. Every deadline that matters.</h2>
+      <p class="section-lede reveal" data-delay="1" style="margin: 0 auto;">The rule changes and due dates that actually affect LA small businesses — summarized in five minutes of reading. No selling, no filler, unsubscribe any time.</p>
+      <form class="newsletter-form reveal" id="newsletter-form" data-delay="2" novalidate>
+        <input type="email" name="email" placeholder="you@yourbusiness.com" aria-label="Email address" autocomplete="email" required />
+        <button type="submit" class="btn btn-gold">Subscribe</button>
+        <span class="form-msg" id="nl-msg" role="status"></span>
+      </form>
+      <span class="note reveal" data-delay="3">Prefer it handled instead of explained? <a href="index.html#contact" style="color: var(--gold-300);">Book a 15-minute call</a>.</span>
+    </div>
+  </section>
+
+  <!-- ============ Footer (shared with homepage) ============ -->
+  <footer class="footer">
+    <div class="footer-grid">
+      <div>
+        <img class="f-logo" src="assets/brand/logo-horizontal-white-v2.svg" alt="J Park & Associates — Certified Public Accountants" width="2000" height="480" />
+        <p>Books, taxes, and compliance for small businesses — handled, so you can run the business.</p>
+      </div>
+      <div>
+        <h4>Visit</h4>
+        <p>2529 Foothill Blvd. Ste 101<br />La Crescenta, CA 91214</p>
+        <p><a href="tel:+18182481580">(818) 248-1580</a></p>
+        <p>Mon&ndash;Fri &middot; 9 AM &ndash; 5:30 PM</p>
+      </div>
+      <div>
+        <h4>Reach us</h4>
+        <ul>
+          <li><a href="mailto:jasonpark@jparkassociates.com">jasonpark@jparkassociates.com</a></li>
+          <li><a href="tel:+18182481580">(818) 248-1580</a></li>
+          <li><a href="index.html#stress-test">Free tax-season stress test</a></li>
+          <li><a href="blog.html">The Ledger — insights</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 J Park &amp; Associates &middot; Certified Public Accountants</span>
+      <span>La Crescenta &middot; Los Angeles</span>
+    </div>
+  </footer>
+
+  <script src="blog/posts.js?v=2"></script>
+  <script src="blog.js?v=2"></script>
+</body>
+</html>

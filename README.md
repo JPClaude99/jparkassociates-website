@@ -22,6 +22,17 @@ A static server is required — the frame sequences won't load from `file://`.
 | `index.html` | The whole site — copy, sections, and the `SCRUB_SECTIONS` frame config at the bottom |
 | `styles.css` | Brand design system (navy/gold/cream, Playfair Display + Inter) |
 | `scroll-cinematic.js` | Scrub engine, Lenis, reveals, pain-point navigator, stress test |
+| `blog.html` | "The Ledger" — blog index (featured post, category filter, card grid, newsletter) |
+| `blog.css` / `blog.js` | Blog styles (on top of `styles.css`) and the index renderer/filter |
+| `blog/posts.js` | Post manifest — the single source of truth the index renders from |
+| `blog/_template.html` | Article template with `{{PLACEHOLDERS}}` — the automation contract |
+| `blog/<slug>.html` | Individual articles (pure static HTML, no JS) |
+| `automation/PIPELINE.md` | Playbook for the weekly announcement-scan agent (drafts Ledger articles via PR) |
+| `automation/EMAILS.md` | Playbook for the monthly client-email agent (incl. recurring deadline calendar) |
+| `automation/sources.json` | The agency feeds both agents watch (IRS, CDTFA, FinCEN, FTB, EDD, DIR…) |
+| `emails/segments.json` | Client segments (industry/location) — one Monthly Close email drafted per active segment |
+| `emails/_template.html` | Branded email template (table-based, inline styles) with `{{PLACEHOLDERS}}` |
+| `emails/drafts/YYYY-MM/` | Generated email drafts + `_SUMMARY.md` per month — review, then send manually |
 | `frames/hero/` | 181 frames — gold ring orbit (the logo's gold ring, made cinematic) |
 | `frames/order/` | 181 frames — paperwork vortex settling into a neat stack (chaos → order) |
 | `video/` | Source 1080p MP4s + keyframes (not loaded by the site; kept for re-slicing) |
@@ -46,6 +57,46 @@ A static server is required — the frame sequences won't load from `file://`.
 - Email: jasonpark@jparkassociates.com
 - Address: 2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214
 
+## The blog ("The Ledger") and the article automation
+
+The blog is designed to be fed by an announcement-tracking pipeline (IRS, CDTFA,
+FinCEN, EDD/FTB, UltraTax CS release notes). Publishing a new article is three
+mechanical steps, in this order:
+
+1. Render `blog/_template.html` with the `{{PLACEHOLDERS}}` filled (see the
+   comment block at the top of the template) and write it to `blog/<slug>.html`.
+2. Prepend a matching entry to the `window.BLOG_POSTS` array in `blog/posts.js`
+   (field reference in that file's header comment).
+3. Add a `<url>` entry to `sitemap.xml`.
+
+No build step, no other files to touch — the index, featured slot, and category
+filters all derive from `posts.js`. Categories: `federal`, `california`,
+`compliance`, `payroll`, `deadlines`, `industry`.
+
+**The six seeded articles are samples written by Claude (June 2026).** They're
+realistic and sourced, but Jason should review them (especially the BOI and
+tip-deduction ones, where rules are in flux) before launch, and the pipeline
+should refresh anything stale.
+
+### The scheduled agents
+
+Two cloud routines run against this repo (manage them via `/schedule` in
+Claude Code). **Both only open PRs — nothing publishes or sends without Jason
+merging/sending.**
+
+- **Weekly announcement scan** (Mondays): follows `automation/PIPELINE.md` —
+  scans `automation/sources.json`, drafts at most 2 articles, opens a
+  `[Ledger]` PR. Most weeks it finds nothing and opens nothing.
+- **Monthly client emails** (23rd): follows `automation/EMAILS.md` — drafts
+  next month's "Monthly Close" email per active segment in
+  `emails/segments.json`, opens a `[Monthly email]` PR. Jason reviews,
+  fills real numbers flagged in `_SUMMARY.md`, and sends via his email tool
+  (no ESP is wired up; `{{UNSUBSCRIBE_URL}}` is filled at send time).
+
+Note: `emails/drafts/` is technically served by GitHub Pages like everything
+else in the repo. Drafts contain no client data — only generic deadline
+content — so this is cosmetic, but move them out of the repo if that changes.
+
 ## Before launch — replace these
 
 - **Office hours** (not yet on the site).
@@ -54,6 +105,10 @@ A static server is required — the frame sequences won't load from `file://`.
 - **Stress-test email form** — UI + validation only; the submit handler in
   `scroll-cinematic.js` (`initStressTest`) is a stub. Connect Netlify Forms,
   Formspree, or an ESP.
+- ~~Blog newsletter form~~ — wired to Web3Forms (key in `blog.js`); new
+  subscribers arrive by email. Move the list to a real ESP when volume grows.
+- **Sample blog articles** — review/replace the six seeded posts (see the blog
+  section above).
 - `og:image` meta tag (a frame from `frames/hero/` works well).
 
 ## Re-slicing frames
