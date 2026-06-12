@@ -74,8 +74,11 @@ calibration. The rules they embody:
 - Typography: use HTML entities as the existing articles do (`&mdash;`,
   `&rsquo;`, `&ldquo;&rdquo;`, `&nbsp;` before "corp"/numbers where they pair).
 - 400–700 words. One topic per article.
+- Apply the SEO conventions in `automation/SEO.md`: one primary search query
+  per article, placed in title/h1/slug/description; internal links to and
+  from existing articles; California/LA specificity.
 
-## Step 5 — Publish mechanics (two steps, in this order)
+## Step 5 — Publish mechanics (three steps, in this order)
 
 1. Render `blog/_template.html` — replace every `{{PLACEHOLDER}}` (the contract
    is documented in the template's header comment) — and write the result to
@@ -84,7 +87,11 @@ calibration. The rules they embody:
    header comment block; output starts `<!DOCTYPE html>` then `<html`.
 2. **Prepend** a matching entry to `window.BLOG_POSTS` in `blog/posts.js`
    (field reference in that file's header). `category` must be one of:
-   `federal | california | compliance | payroll | deadlines | industry`.
+   `federal | california | compliance | payroll | deadlines | industry |
+   guides` (`guides` = evergreen owner's guides, usually firm-authored, not
+   announcement-driven).
+3. Append a `<url>` entry for the article to `sitemap.xml` (`lastmod` = the
+   publication date).
 
 ## Step 6 — QA checklist (do not skip)
 

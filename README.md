@@ -60,13 +60,14 @@ A static server is required — the frame sequences won't load from `file://`.
 ## The blog ("The Ledger") and the article automation
 
 The blog is designed to be fed by an announcement-tracking pipeline (IRS, CDTFA,
-FinCEN, EDD/FTB, UltraTax CS release notes). Publishing a new article is two
+FinCEN, EDD/FTB, UltraTax CS release notes). Publishing a new article is three
 mechanical steps, in this order:
 
 1. Render `blog/_template.html` with the `{{PLACEHOLDERS}}` filled (see the
    comment block at the top of the template) and write it to `blog/<slug>.html`.
 2. Prepend a matching entry to the `window.BLOG_POSTS` array in `blog/posts.js`
    (field reference in that file's header comment).
+3. Add a `<url>` entry to `sitemap.xml`.
 
 No build step, no other files to touch — the index, featured slot, and category
 filters all derive from `posts.js`. Categories: `federal`, `california`,
@@ -104,8 +105,8 @@ content — so this is cosmetic, but move them out of the repo if that changes.
 - **Stress-test email form** — UI + validation only; the submit handler in
   `scroll-cinematic.js` (`initStressTest`) is a stub. Connect Netlify Forms,
   Formspree, or an ESP.
-- **Blog newsletter form** (`blog.html` / `blog.js`) — same situation: UI +
-  validation only, marked `TODO` in `blog.js`. Wire to the same ESP.
+- ~~Blog newsletter form~~ — wired to Web3Forms (key in `blog.js`); new
+  subscribers arrive by email. Move the list to a real ESP when volume grows.
 - **Sample blog articles** — review/replace the six seeded posts (see the blog
   section above).
 - `og:image` meta tag (a frame from `frames/hero/` works well).

@@ -11,7 +11,7 @@
      excerpt   — 1–2 sentences, plain text
      date      — ISO yyyy-mm-dd (publication date)
      category  — one of: federal | california | compliance |
-                 payroll | deadlines | industry
+                 payroll | deadlines | industry | guides
      source    — issuing authority shown on the card
                  (e.g. "IRS", "CDTFA", "FinCEN", "EDD",
                   "J Park & Associates")
@@ -19,6 +19,36 @@
      readMins  — integer, estimated reading time
    ============================================================ */
 window.BLOG_POSTS = [
+  {
+    slug: "how-to-choose-small-business-cpa-los-angeles",
+    title: "How to choose a small-business CPA in Los Angeles: 10 questions that separate the good ones",
+    excerpt: "Most owners pick a CPA on proximity and price, then quietly regret it every April. Ten questions that surface whether a firm will actually run your books, taxes, and deadlines — asked before you sign.",
+    date: "2026-06-12",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 7
+  },
+  {
+    slug: "s-corp-vs-llc-california-taxes",
+    title: "S corp vs. LLC in California: what each one actually costs you in tax",
+    excerpt: "An LLC is a legal wrapper; an S corp is a tax election — and in California each carries its own price tag. The self-employment-tax math, the $800s and the 1.5%, and when the switch pays for itself.",
+    date: "2026-06-11",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 7
+  },
+  {
+    slug: "la-crescenta-glendale-business-tax-map",
+    title: "Running a business in La Crescenta or Glendale? Your local tax & license map",
+    excerpt: "In the foothills, the agency that regulates you can change street by street — unincorporated LA County vs. the City of Glendale. Who collects what, which licenses apply, and the local traps to check.",
+    date: "2026-06-10",
+    category: "guides",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 6
+  },
   {
     slug: "q2-estimated-taxes-june-15",
     title: "Q2 estimated taxes are due June 15 — here's how to get the number right",
