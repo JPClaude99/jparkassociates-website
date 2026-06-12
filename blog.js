@@ -13,7 +13,8 @@
     compliance: "Compliance & FinCEN",
     payroll:    "Payroll & People",
     deadlines:  "Deadlines",
-    industry:   "Industry Guides"
+    industry:   "Industry Guides",
+    guides:     "Owner's Guides"
   };
 
   var posts = (window.BLOG_POSTS || []).slice().sort(function (a, b) {
@@ -131,22 +132,55 @@
   window.addEventListener("scroll", navTone, { passive: true });
   navTone();
 
-  /* ---------- Newsletter (stub — same contract as the contact form) ---------- */
+  /* ---------- Newsletter — submits to Web3Forms (key for the blog,
+     separate from the forms in scroll-cinematic.js) ---------- */
+  var WEB3_KEY = "f157657a-37a9-47ec-9b50-3b8960d41025";
   var form = document.getElementById("newsletter-form");
   if (form) {
-    form.addEventListener("submit", function (e) {
+    form.addEventListener("submit", async function (e) {
       e.preventDefault();
-      var email = form.querySelector("input[type=email]");
+      var emailInput = form.querySelector("input[type=email]");
       var msg = document.getElementById("nl-msg");
-      if (!email.value || email.value.indexOf("@") < 1) {
-        msg.textContent = "Please enter a valid email address.";
+      var submitBtn = form.querySelector("button[type='submit']");
+      var value = emailInput.value.trim();
+      if (!value || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+        msg.textContent = "That email doesn't look right — mind checking it?";
         msg.className = "form-msg err";
+        emailInput.setAttribute("aria-invalid", "true");
+        emailInput.focus();
         return;
       }
-      /* TODO before launch: wire to Web3Forms / ESP, same as #contact-form */
-      msg.textContent = "You're on the list. One email a month — that's the whole deal.";
-      msg.className = "form-msg ok";
-      form.reset();
+      emailInput.removeAttribute("aria-invalid");
+      submitBtn.disabled = true;
+      msg.textContent = "Subscribing…";
+      msg.className = "form-msg";
+      try {
+        var res = await fetch("https://api.web3forms.com/submit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            access_key: WEB3_KEY,
+            subject: "New Monthly Close subscriber — jparkassociates.com",
+            from_name: "The Ledger Newsletter Form",
+            email: value,
+            cc: "justinparkcpa@gmail.com",
+            message: "Add to The Monthly Close list: " + value
+          })
+        });
+        var data = await res.json();
+        if (data.success) {
+          msg.textContent = "You're on the list. One email a month — that's the whole deal.";
+          msg.className = "form-msg ok";
+          form.reset();
+        } else {
+          throw new Error(data.message);
+        }
+      } catch (err) {
+        msg.textContent = "Something went wrong — email jasonpark@jparkassociates.com and we'll add you.";
+        msg.className = "form-msg err";
+      } finally {
+        submitBtn.disabled = false;
+      }
     });
   }
 

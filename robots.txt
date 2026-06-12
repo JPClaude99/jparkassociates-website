@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /emails/
+Disallow: /automation/
+Disallow: /video/
+
+Sitemap: https://jparkassociates.com/sitemap.xml
