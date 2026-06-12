@@ -804,21 +804,6 @@ a { color: inherit; }
   .ba-col ul { gap: 10px; }
   .ba-col li { font-size: 0.8rem; padding-left: 20px; }
 
-  /* Cinematic vignette: blends the width-fit letterbox bars into the
-     dark section background. --cine-blend-top/bot are set by JS in resize()
-     to match the exact frame position for the current device height. */
-  .cinematic .vignette {
-    background:
-      radial-gradient(120% 90% at 50% 50%, transparent 52%, rgba(10, 16, 30, 0.55) 100%),
-      linear-gradient(180deg,
-        rgba(10, 16, 30, 0.97) 0%,
-        rgba(10, 16, 30, 0.97) calc(var(--cine-blend-top, 37%) - 2%),
-        rgba(10, 16, 30, 0.0)  calc(var(--cine-blend-top, 37%) + 2%),
-        rgba(10, 16, 30, 0.0)  calc(var(--cine-blend-bot, 63%) - 2%),
-        rgba(10, 16, 30, 0.97) calc(var(--cine-blend-bot, 63%) + 2%),
-        rgba(10, 16, 30, 0.97) 100%
-      );
-  }
 }
 @media (max-width: 580px) {
   .nav { padding-left: 16px; padding-right: 16px; }

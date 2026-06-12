@@ -156,12 +156,7 @@ function initScrub(cfg) {
     if (!cw || !ch) return;
     const ir = iw / ih, cr = cw / ch;
     let dw, dh, dx, dy;
-    if (ch > cw && ir > 1) {
-      /* Portrait canvas + landscape frame: fit by width so the full frame
-         is visible (ring/subject intact). Navy fill above/below is covered
-         by the mobile vignette (--cine-blend-top/bot set in resize). */
-      dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2;
-    } else if (ir > cr) {
+    if (ir > cr) {
       dh = ch; dw = ch * ir; dx = (cw - dw) / 2; dy = 0;
     } else {
       dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2;
@@ -185,15 +180,6 @@ function initScrub(cfg) {
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    /* On portrait mobile + landscape frame, publish the frame's vertical
-       position so the CSS vignette gradient can blend the width-fit
-       letterbox bars seamlessly into the section's navy background. */
-    if (frameW && frameH && cssH > cssW && frameW > frameH) {
-      const fh = cssW / (frameW / frameH);
-      const fy = (cssH - fh) / 2;
-      section.style.setProperty('--cine-blend-top', (fy / cssH * 100).toFixed(1) + '%');
-      section.style.setProperty('--cine-blend-bot', ((fy + fh) / cssH * 100).toFixed(1) + '%');
-    }
     /* Paint the section's navy immediately — an alpha:false canvas is
        opaque black until first draw, which read as a dead-black flash
        before frame 1 decoded (and after any resize mid-catchup). */
