@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111c33" />
+  <title>S-Corp vs. LLC Tax Calculator — California 2026 | J Park &amp; Associates</title>
+  <meta name="description" content="Free California S-corp vs. LLC calculator. See how much Social Security &amp; Medicare tax an S-corp election could save you in 2026, and find the profit level where it pays off — built on current IRS and California FTB figures." />
+  <meta property="og:title" content="S-Corp vs. LLC Tax Calculator — California (2026)" />
+  <meta property="og:description" content="See how much self-employment tax an S-corp election could save you in 2026, and find your breakeven profit. Built on current IRS and FTB figures." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jparkassociates.com/tools/s-corp-vs-llc-calculator.html" />
+  <meta property="og:image" content="https://jparkassociates.com/assets/og-image.jpg" />
+  <meta property="og:site_name" content="J Park & Associates" />
+  <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="S-Corp vs. LLC Tax Calculator — California (2026)" />
+  <meta name="twitter:description" content="See how much self-employment tax an S-corp election could save you in 2026, and find your breakeven profit. Built on current IRS and FTB figures." />
+  <meta name="twitter:image" content="https://jparkassociates.com/assets/og-image.jpg" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="author" content="J Park & Associates" />
+  <link rel="canonical" href="https://jparkassociates.com/tools/s-corp-vs-llc-calculator.html" />
+  <link rel="icon" href="../assets/favicon/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon/favicon-32.png" />
+  <link rel="apple-touch-icon" href="../assets/favicon/apple-touch-icon-180.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600;1,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css?v=10" />
+  <link rel="stylesheet" href="../blog.css?v=2" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "S-Corp vs. LLC Tax Calculator (California, 2026)",
+    "description": "A free calculator that estimates the Social Security and Medicare (self-employment) tax an S-corporation election could save a California business owner in 2026, net of California's S-corp franchise tax, and identifies the breakeven profit level.",
+    "url": "https://jparkassociates.com/tools/s-corp-vs-llc-calculator.html",
+    "applicationCategory": "FinanceApplication",
+    "operatingSystem": "All",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "provider": { "@type": "AccountingService", "name": "J Park & Associates", "url": "https://jparkassociates.com", "telephone": "+1-818-248-1580" }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://jparkassociates.com/" },
+      { "@type": "ListItem", "position": 2, "name": "Free Tools", "item": "https://jparkassociates.com/tools/" },
+      { "@type": "ListItem", "position": 3, "name": "S-Corp vs. LLC Calculator", "item": "https://jparkassociates.com/tools/s-corp-vs-llc-calculator.html" }
+    ]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "How much can an S-corp election save in California?",
+        "acceptedAnswer": { "@type": "Answer", "text": "An S-corp election lets an owner take part of the profit as distributions, which are not subject to the 15.3% Social Security and Medicare tax. The savings equal that tax on the distribution portion, minus California's 1.5% S-corp franchise tax (minimum $800) and payroll/administrative costs. The calculator estimates this using current IRS and FTB figures for 2026." }
+      },
+      {
+        "@type": "Question",
+        "name": "What is a reasonable salary for an S-corp owner?",
+        "acceptedAnswer": { "@type": "Answer", "text": "The IRS requires S-corporation owner-employees to pay themselves reasonable compensation for the work they perform before taking distributions. There is no fixed formula; it must reflect market wages for the role. Setting an artificially low salary to avoid payroll tax is a common audit trigger." }
+      },
+      {
+        "@type": "Question",
+        "name": "Does this calculator include income tax?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. It models only Social Security and Medicare (self-employment) tax and California entity-level taxes, which is where the S-corp election creates its core savings. It does not model federal or California income tax or the qualified business income (QBI) deduction, which require a full projection." }
+      }
+    ]
+  }
+  </script>
+  <style>
+    /* ---- S-Corp calculator (scoped) ---- */
+    .calc-intro { max-width: 760px; margin: 0 auto 8px; }
+    .calc-wrap { max-width: 960px; margin: 28px auto 0; }
+    .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+    @media (max-width: 760px) { .calc-grid { grid-template-columns: 1fr; } }
+
+    .calc-card {
+      background: var(--white);
+      border: 1px solid rgba(27,42,74,0.10);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-soft);
+      padding: 26px 24px;
+    }
+    .calc-card h2 { font-size: 1.25rem; margin: 0 0 4px; }
+    .calc-card .card-sub { font-size: 0.9rem; color: var(--grey-500); margin: 0 0 18px; }
+
+    .field { margin: 0 0 20px; }
+    .field > label { display: block; font-weight: 600; color: var(--navy-900); font-size: 0.95rem; margin: 0 0 8px; }
+    .field .hint { font-weight: 400; color: var(--grey-500); font-size: 0.82rem; }
+    .field .hint a { color: var(--navy-700); text-decoration: underline; }
+
+    .input-row { display: flex; align-items: center; gap: 12px; }
+    .money-input {
+      display: inline-flex; align-items: center; gap: 4px;
+      border: 1.5px solid rgba(27,42,74,0.18); border-radius: 10px;
+      padding: 8px 12px; background: var(--cream-50); min-width: 140px;
+    }
+    .money-input span { color: var(--grey-500); font-weight: 600; }
+    .money-input input {
+      border: 0; background: transparent; font: 600 1.05rem var(--sans);
+      color: var(--navy-900); width: 100%; outline: none;
+    }
+    .money-input input::-webkit-outer-spin-button,
+    .money-input input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .money-input input[type=number] { -moz-appearance: textfield; }
+
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 6px;
+      background: linear-gradient(90deg, var(--gold-500) var(--fill,40%), rgba(27,42,74,0.14) var(--fill,40%)); outline: none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px;
+      border-radius: 50%; background: var(--navy-900); border: 3px solid var(--gold-500); cursor: pointer; box-shadow: var(--shadow-soft); }
+    input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: var(--navy-900);
+      border: 3px solid var(--gold-500); cursor: pointer; }
+
+    select, .adv input[type=number] {
+      border: 1.5px solid rgba(27,42,74,0.18); border-radius: 10px; padding: 9px 12px;
+      background: var(--cream-50); font: 500 0.98rem var(--sans); color: var(--navy-900); width: 100%;
+    }
+    .adv { margin-top: 6px; border-top: 1px dashed rgba(27,42,74,0.16); padding-top: 6px; }
+    .adv > summary { cursor: pointer; font-weight: 600; color: var(--navy-700); font-size: 0.92rem; padding: 10px 0; list-style: none; }
+    .adv > summary::-webkit-details-marker { display: none; }
+    .adv > summary::before { content: "＋ "; color: var(--gold-500); font-weight: 700; }
+    .adv[open] > summary::before { content: "－ "; }
+    .adv .check-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 16px; }
+    .adv .check-row input { width: 18px; height: 18px; accent-color: var(--gold-500); }
+    .adv .check-row label { font-weight: 500; color: var(--slate-600); font-size: 0.92rem; }
+
+    /* Results */
+    .result-card { background: var(--navy-900); color: var(--cream-50); }
+    .result-card h2 { color: var(--cream-50); }
+    .result-card .card-sub { color: rgba(245,240,232,0.66); }
+    .verdict-label { font: 600 0.72rem var(--sans); letter-spacing: 2.5px; text-transform: uppercase; color: var(--gold-300); margin: 4px 0 6px; }
+    .verdict-amount { font: 900 2.6rem/1.05 var(--serif); color: var(--white); margin: 0; }
+    .verdict-amount.negative { color: #f0b8b8; }
+    .verdict-note { font-size: 0.95rem; color: rgba(245,240,232,0.82); margin: 8px 0 0; }
+    .breakeven {
+      margin: 18px 0; padding: 14px 16px; border-radius: 10px;
+      background: rgba(201,168,76,0.14); border-left: 4px solid var(--gold-500); font-size: 0.95rem; color: var(--cream-50);
+    }
+    .breakeven strong { color: var(--gold-300); }
+
+    .breakdown { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 0.9rem; }
+    .breakdown th, .breakdown td { padding: 9px 8px; text-align: right; border-bottom: 1px solid rgba(245,240,232,0.14); }
+    .breakdown th:first-child, .breakdown td:first-child { text-align: left; color: rgba(245,240,232,0.82); }
+    .breakdown thead th { color: var(--gold-300); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.5px; }
+    .breakdown tbody td { color: var(--cream-50); font-variant-numeric: tabular-nums; }
+    .breakdown tr.total td { border-top: 2px solid rgba(201,168,76,0.5); border-bottom: 0; font-weight: 700; padding-top: 12px; }
+    .breakdown tr.muted td { color: rgba(245,240,232,0.55); }
+
+    .how-box { max-width: 760px; margin: 40px auto 0; }
+    .how-box h2 { font-size: 1.4rem; margin: 0 0 14px; }
+    .how-box ul { margin: 0 0 8px 0; padding-left: 0; list-style: none; display: grid; gap: 12px; }
+    .how-box li { position: relative; padding-left: 26px; }
+    .how-box li::before { content: ""; position: absolute; left: 0; top: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--gold-500); }
+    .how-box li strong { color: var(--navy-900); }
+    .how-box a { color: var(--navy-700); text-decoration: underline; }
+    .figures { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
+    .figures .chip { background: var(--white); border: 1px solid rgba(27,42,74,0.12); border-radius: 999px; padding: 7px 14px; font-size: 0.84rem; color: var(--navy-900); font-weight: 600; }
+    .figures .chip span { color: var(--grey-500); font-weight: 400; }
+  </style>
+</head>
+<body>
+
+  <nav class="nav on-light" aria-label="Main">
+    <a class="logo" href="../index.html" aria-label="J Park & Associates — home">
+      <img class="logo-light" src="../assets/brand/logo-horizontal-white-v2.svg" alt="J Park & Associates — Certified Public Accountants" width="2000" height="480" />
+      <img class="logo-dark" src="../assets/brand/logo-horizontal-v2.svg" alt="" aria-hidden="true" width="2000" height="480" />
+    </a>
+    <ul class="nav-links">
+      <li><a href="../index.html#pain">Pain points</a></li>
+      <li><a href="../index.html#industries">Industries</a></li>
+      <li><a href="../index.html#how">How it works</a></li>
+      <li><a href="../blog.html">Insights</a></li>
+      <li><a href="../index.html#contact">Contact</a></li>
+    </ul>
+    <a class="btn btn-gold nav-cta" href="../index.html#stress-test">
+      <span class="label-full">Run the 2-minute stress test</span>
+      <span class="label-short">2-min stress test</span>
+    </a>
+  </nav>
+
+  <header class="article-hero">
+    <div class="container-narrow">
+      <a class="crumb" href="../blog.html">Free Tools</a>
+      <span class="cat">Calculator</span>
+      <h1>S-Corp vs. LLC Tax Calculator — California (2026)</h1>
+      <div class="post-meta">
+        <span class="src-tag">J Park &amp; Associates</span>
+        <span class="dot">&middot;</span>
+        <time datetime="2026-06-13">Updated June 2026</time>
+        <span class="dot">&middot;</span>
+        <span>Free &middot; no sign-up</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="article-body">
+    <div class="container-narrow">
+      <p class="calc-intro">The S-corp election saves money by letting you take part of your profit as distributions, which escape the 15.3% Social Security&nbsp;&amp; Medicare tax. This tool estimates that saving for a California business in 2026 &mdash; net of California&rsquo;s 1.5% S-corp tax &mdash; and finds the profit level where the election starts to pay off. It models the payroll-tax piece only (not income tax or the QBI deduction); move the sliders to see your numbers.</p>
+
+      <div class="calc-wrap">
+        <div class="calc-grid">
+
+          <!-- INPUTS -->
+          <section class="calc-card" aria-label="Your numbers">
+            <h2>Your numbers</h2>
+            <p class="card-sub">Estimates &mdash; round figures are fine.</p>
+
+            <div class="field">
+              <label for="profit">Annual net profit <span class="hint">&mdash; business income before you pay yourself</span></label>
+              <div class="input-row">
+                <input type="range" id="profitRange" min="0" max="1000000" step="5000" value="150000" aria-label="Annual net profit slider" />
+                <div class="money-input"><span>$</span><input type="number" id="profit" min="0" max="1000000" step="1000" value="150000" aria-label="Annual net profit" /></div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="salary">Reasonable W-2 salary <span class="hint">&mdash; market pay for your role (<a href="https://www.irs.gov/businesses/small-businesses-self-employed/s-corporation-compensation-and-medical-insurance-issues" rel="noopener" target="_blank">IRS rules</a>)</span></label>
+              <div class="input-row">
+                <input type="range" id="salaryRange" min="0" max="300000" step="5000" value="80000" aria-label="Reasonable salary slider" />
+                <div class="money-input"><span>$</span><input type="number" id="salary" min="0" max="500000" step="1000" value="80000" aria-label="Reasonable salary" /></div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="filing">Tax filing status <span class="hint">&mdash; sets the 0.9% Additional Medicare threshold</span></label>
+              <select id="filing" aria-label="Filing status">
+                <option value="single" selected>Single / Head of household</option>
+                <option value="mfj">Married filing jointly</option>
+                <option value="mfs">Married filing separately</option>
+              </select>
+            </div>
+
+            <details class="adv">
+              <summary>Fine-tune (optional)</summary>
+              <div class="check-row">
+                <input type="checkbox" id="isLLC" checked />
+                <label for="isLLC">My business is an LLC (adds CA&rsquo;s $800 tax &amp; gross-receipts fee to the default side)</label>
+              </div>
+              <div class="field">
+                <label for="gross">Annual gross revenue <span class="hint">&mdash; sets the CA LLC fee tier (only matters at $250k+)</span></label>
+                <input type="number" id="gross" min="0" step="10000" placeholder="e.g., 200000" aria-label="Annual gross revenue" />
+              </div>
+              <div class="field">
+                <label for="admin">Added S-corp admin cost / year <span class="hint">&mdash; your estimate for payroll service + S-corp return (not a tax figure)</span></label>
+                <div class="money-input"><span>$</span><input type="number" id="admin" min="0" step="100" value="0" aria-label="Added S-corp admin cost" /></div>
+              </div>
+            </details>
+          </section>
+
+          <!-- RESULTS -->
+          <section class="calc-card result-card" aria-live="polite" aria-label="Estimated result">
+            <p class="verdict-label" id="verdictLabel">Estimated annual S-corp saving</p>
+            <p class="verdict-amount" id="verdictAmount">$0</p>
+            <p class="verdict-note" id="verdictNote"></p>
+
+            <div class="breakeven" id="breakeven"></div>
+
+            <table class="breakdown">
+              <thead>
+                <tr><th>Social Security &amp; Medicare + CA</th><th id="colA">Default</th><th id="colB">S-corp</th></tr>
+              </thead>
+              <tbody id="breakdownBody"><!-- filled by JS --></tbody>
+            </table>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- HOW IT'S CALCULATED -->
+      <div class="how-box">
+        <h2>How it&rsquo;s calculated (and the figures behind it)</h2>
+        <ul>
+          <li><strong>Default (sole proprietor / LLC):</strong> self-employment tax of 15.3% &mdash; 12.4% Social Security on net earnings up to the wage base, plus 2.9% Medicare on all of it &mdash; applied to 92.35% of profit, per <a href="https://www.irs.gov/businesses/small-businesses-self-employed/self-employment-tax-social-security-and-medicare-taxes" rel="noopener" target="_blank">IRS</a> and <a href="https://www.irs.gov/instructions/i1040sse" rel="noopener" target="_blank">Schedule SE</a>.</li>
+          <li><strong>S-corp:</strong> the same Social Security &amp; Medicare rates apply only to your W-2 salary; the remaining profit, taken as distributions, pays none. That gap is the saving.</li>
+          <li><strong>0.9% Additional Medicare</strong> applies above $200,000 (single/HoH), $250,000 (married filing jointly), or $125,000 (married filing separately), per <a href="https://www.irs.gov/taxtopics/tc560" rel="noopener" target="_blank">IRS Topic 560</a>.</li>
+          <li><strong>California, default LLC:</strong> the <a href="https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" rel="noopener" target="_blank">$800 annual tax</a> plus the LLC fee on gross receipts ($900 / $2,500 / $6,000 / $11,790 at $250k / $500k / $1M / $5M), per <a href="https://www.ftb.ca.gov/forms/2026/2026-3536.pdf" rel="noopener" target="_blank">FTB Form 3536</a>.</li>
+          <li><strong>California, S-corp:</strong> a <a href="https://www.ftb.ca.gov/file/business/types/corporations/s-corporations.html" rel="noopener" target="_blank">1.5% franchise tax on net income</a>, with the same $800 minimum.</li>
+        </ul>
+        <div class="figures">
+          <span class="chip">2026 SS wage base <span>$184,500</span></span>
+          <span class="chip">Social Security <span>12.4%</span></span>
+          <span class="chip">Medicare <span>2.9%</span></span>
+          <span class="chip">Add&rsquo;l Medicare <span>0.9%</span></span>
+          <span class="chip">CA S-corp <span>1.5% &middot; min $800</span></span>
+        </div>
+      </div>
+
+      <div class="sources-box">
+        <span class="label">Sources &mdash; government authorities only</span>
+        <ul>
+          <li><a href="https://www.ssa.gov/oact/cola/cbb.html" rel="noopener" target="_blank">SSA &mdash; 2026 Social Security wage base ($184,500)</a></li>
+          <li><a href="https://www.irs.gov/businesses/small-businesses-self-employed/self-employment-tax-social-security-and-medicare-taxes" rel="noopener" target="_blank">IRS &mdash; Self-employment tax (15.3%, 92.35% factor)</a></li>
+          <li><a href="https://www.irs.gov/taxtopics/tc751" rel="noopener" target="_blank">IRS Topic 751 &mdash; Social Security &amp; Medicare withholding rates</a></li>
+          <li><a href="https://www.irs.gov/taxtopics/tc560" rel="noopener" target="_blank">IRS Topic 560 &mdash; Additional Medicare Tax (0.9%)</a></li>
+          <li><a href="https://www.irs.gov/businesses/small-businesses-self-employed/s-corporation-compensation-and-medical-insurance-issues" rel="noopener" target="_blank">IRS &mdash; Reasonable compensation for S-corp owners</a></li>
+          <li><a href="https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" rel="noopener" target="_blank">CA FTB &mdash; LLC annual tax &amp; fee</a></li>
+          <li><a href="https://www.ftb.ca.gov/file/business/types/corporations/s-corporations.html" rel="noopener" target="_blank">CA FTB &mdash; S corporations (1.5% franchise tax)</a></li>
+        </ul>
+      </div>
+      <p class="disclaimer">This calculator estimates Social Security &amp; Medicare (self-employment) tax and California entity-level taxes only. It does <strong>not</strong> model federal or California income tax, the qualified business income (QBI) deduction, the income-tax benefit of the self-employment-tax deduction, retirement contributions, or health insurance &mdash; all of which affect the real answer. It is general information, not tax advice for your situation. A &ldquo;reasonable&rdquo; salary must reflect market pay for your work; setting it too low is a known audit trigger. Talk to a CPA before electing.</p>
+    </div>
+  </main>
+
+  <section class="article-cta">
+    <h2>Want your <em>real</em> number, not an estimate?</h2>
+    <p>The savings above are the payroll-tax piece. Your actual answer also turns on income tax, the QBI deduction, a defensible salary, and your margins &mdash; that&rsquo;s a 15-minute conversation, and we&rsquo;ll run it on your numbers.</p>
+    <div class="cta-row">
+      <a class="btn btn-gold" href="../index.html#contact">Book a 15-minute call</a>
+      <a class="btn btn-ghost-light" href="../blog/s-corp-vs-llc-california-taxes.html">Read the full S-corp vs. LLC guide</a>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-grid">
+      <div>
+        <img class="f-logo" src="../assets/brand/logo-horizontal-white-v2.svg" alt="J Park & Associates — Certified Public Accountants" width="2000" height="480" />
+        <p>Books, taxes, and compliance for small businesses — handled, so you can run the business.</p>
+      </div>
+      <div>
+        <h4>Visit</h4>
+        <p>2529 Foothill Blvd. Ste 101<br />La Crescenta, CA 91214</p>
+        <p><a href="tel:+18182481580">(818) 248-1580</a></p>
+        <p>Mon&ndash;Fri &middot; 9 AM &ndash; 5:30 PM</p>
+      </div>
+      <div>
+        <h4>Reach us</h4>
+        <ul>
+          <li><a href="mailto:justinpark@jparkassociates.com">justinpark@jparkassociates.com</a></li>
+          <li><a href="tel:+18182481580">(818) 248-1580</a></li>
+          <li><a href="../index.html#stress-test">Free tax-season stress test</a></li>
+          <li><a href="../blog.html">The Ledger — insights</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 J Park &amp; Associates &middot; Certified Public Accountants</span>
+      <span>La Crescenta &middot; Los Angeles</span>
+    </div>
+  </footer>
+
+  <script>
+  (function () {
+    "use strict";
+    // ---- 2026 government-sourced constants ----
+    var SS_WAGE_BASE = 184500;   // SSA 2026 contribution & benefit base
+    var SS_RATE      = 0.124;    // 12.4% Social Security (both halves)
+    var MED_RATE     = 0.029;    // 2.9% Medicare (both halves)
+    var ADDL_MED     = 0.009;    // 0.9% Additional Medicare
+    var SE_FACTOR    = 0.9235;   // net earnings from self-employment factor
+    var CA_LLC_TAX   = 800;      // CA annual LLC tax
+    var CA_SCORP_RATE= 0.015;    // 1.5% CA S-corp franchise tax
+    var CA_MIN       = 800;      // CA minimum franchise tax
+    var ADDL_THRESH  = { single: 200000, mfj: 250000, mfs: 125000 };
+
+    function llcFee(gross) {
+      if (gross >= 5000000) return 11790;
+      if (gross >= 1000000) return 6000;
+      if (gross >= 500000)  return 2500;
+      if (gross >= 250000)  return 900;
+      return 0;
+    }
+
+    // Default structure (sole prop / LLC): self-employment tax + CA LLC tax/fee
+    function defaultSide(profit, filing, isLLC, gross) {
+      var netSE = Math.max(0, profit) * SE_FACTOR;
+      var ss   = Math.min(netSE, SS_WAGE_BASE) * SS_RATE;
+      var med  = netSE * MED_RATE;
+      var addl = Math.max(0, netSE - ADDL_THRESH[filing]) * ADDL_MED;
+      var ca   = isLLC ? (CA_LLC_TAX + llcFee(gross)) : 0;
+      return { ss: ss, med: med, addl: addl, caBase: isLLC ? CA_LLC_TAX : 0, caFee: isLLC ? llcFee(gross) : 0, ca: ca, total: ss + med + addl + ca };
+    }
+
+    // S-corp: FICA on salary only + 1.5% CA tax (min $800) + admin
+    function scorpSide(profit, salary, filing, admin) {
+      var S = Math.min(Math.max(0, salary), Math.max(0, profit)); // can't pay more salary than profit
+      var ss   = Math.min(S, SS_WAGE_BASE) * SS_RATE;
+      var med  = S * MED_RATE;
+      var addl = Math.max(0, S - ADDL_THRESH[filing]) * ADDL_MED;
+      var employerFica = Math.min(S, SS_WAGE_BASE) * 0.062 + S * 0.0145; // deductible against CA net income
+      var caNet = Math.max(0, profit - S - employerFica);
+      var ca   = Math.max(CA_MIN, caNet * CA_SCORP_RATE);
+      return { ss: ss, med: med, addl: addl, caBase: CA_MIN, caFee: Math.max(0, ca - CA_MIN), ca: ca, admin: admin, total: ss + med + addl + ca + admin };
+    }
+
+    function breakeven(salary, filing, isLLC, gross, admin) {
+      // smallest profit (>= salary) where the S-corp total is lower than the default
+      for (var p = Math.max(salary, 1000); p <= 2000000; p += 500) {
+        var d = defaultSide(p, filing, isLLC, gross).total;
+        var s = scorpSide(p, salary, filing, admin).total;
+        if (d - s > 0) return p;
+      }
+      return null;
+    }
+
+    // ---- formatting ----
+    function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+    function fmt0(n) { return Math.round(n).toLocaleString("en-US"); }
+
+    // ---- elements ----
+    var el = function (id) { return document.getElementById(id); };
+    var profit = el("profit"), profitRange = el("profitRange");
+    var salary = el("salary"), salaryRange = el("salaryRange");
+    var filing = el("filing"), isLLC = el("isLLC"), gross = el("gross"), admin = el("admin");
+
+    function syncFill(range) {
+      var pct = (range.value - range.min) / (range.max - range.min) * 100;
+      range.style.setProperty("--fill", pct + "%");
+    }
+
+    function recalc() {
+      var P = Math.max(0, +profit.value || 0);
+      var S = Math.max(0, +salary.value || 0);
+      var f = filing.value;
+      var llc = isLLC.checked;
+      var g = Math.max(0, +gross.value || 0);
+      var a = Math.max(0, +admin.value || 0);
+
+      var d = defaultSide(P, f, llc, g);
+      var s = scorpSide(P, S, f, a);
+      var saving = d.total - s.total;
+
+      // headline
+      var amt = el("verdictAmount"), note = el("verdictNote"), label = el("verdictLabel");
+      if (saving >= 0) {
+        label.textContent = "Estimated annual S-corp saving";
+        amt.textContent = fmt(saving);
+        amt.classList.remove("negative");
+        note.textContent = saving > 0
+          ? "Versus staying a sole proprietor / LLC, at this profit and salary."
+          : "It's a wash at this profit and salary.";
+      } else {
+        label.textContent = "An S-corp would cost more right now";
+        amt.textContent = "+" + fmt(-saving);
+        amt.classList.add("negative");
+        note.textContent = "At this profit, the 1.5% CA tax and payroll cost outweigh the savings.";
+      }
+
+      // breakeven
+      var be = breakeven(S, f, llc, g, a);
+      var beBox = el("breakeven");
+      if (be === null) {
+        beBox.innerHTML = "At a <strong>" + fmt(S) + "</strong> salary, the election doesn&rsquo;t pull ahead within the range modeled &mdash; check your salary assumption.";
+      } else if (P >= be) {
+        beBox.innerHTML = "You&rsquo;re past breakeven: above about <strong>" + fmt(be) + "</strong> of profit (at a " + fmt(S) + " salary), the S-corp election starts saving.";
+      } else {
+        beBox.innerHTML = "Breakeven: the election begins to save once profit passes about <strong>" + fmt(be) + "</strong> (at a " + fmt(S) + " salary).";
+      }
+
+      // breakdown table
+      var rows = [
+        ["Social Security tax", d.ss, s.ss],
+        ["Medicare tax", d.med, s.med],
+        ["Additional Medicare (0.9%)", d.addl, s.addl],
+        ["CA $800 minimum", d.caBase, s.caBase],
+        [llc ? "CA LLC fee (receipts)" : "CA LLC fee", d.caFee, "—muted—"],
+        ["CA 1.5% S-corp tax", "—muted—", s.caFee]
+      ];
+      if (a > 0) rows.push(["Added admin cost", 0, s.admin]);
+      var body = el("breakdownBody");
+      var html = "";
+      rows.forEach(function (r) {
+        var aCell = (r[1] === "—muted—") ? '<td class="muted-cell">—</td>' : "<td>" + fmt(r[1]) + "</td>";
+        var bCell = (r[2] === "—muted—") ? '<td class="muted-cell">—</td>' : "<td>" + fmt(r[2]) + "</td>";
+        html += "<tr><td>" + r[0] + "</td>" + aCell + bCell + "</tr>";
+      });
+      html += '<tr class="total"><td>Total payroll/CA tax</td><td>' + fmt(d.total) + "</td><td>" + fmt(s.total) + "</td></tr>";
+      body.innerHTML = html;
+    }
+
+    // ---- bind range <-> number pairs ----
+    function pair(range, num) {
+      range.addEventListener("input", function () { num.value = range.value; syncFill(range); recalc(); });
+      num.addEventListener("input", function () {
+        var v = Math.min(+num.value || 0, +range.max);
+        range.value = Math.max(+range.min, v); syncFill(range); recalc();
+      });
+    }
+    pair(profitRange, profit);
+    pair(salaryRange, salary);
+    [filing, isLLC, gross, admin].forEach(function (n) { n.addEventListener("input", recalc); n.addEventListener("change", recalc); });
+
+    syncFill(profitRange); syncFill(salaryRange);
+    recalc();
+  })();
+  </script>
+
+</body>
+</html>
