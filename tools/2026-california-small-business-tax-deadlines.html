@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111c33" />
+  <title>2026 California Small-Business Tax Deadline Calendar | J Park &amp; Associates</title>
+  <meta name="description" content="Every 2026 federal and California small-business tax deadline in one place — income tax, estimated payments, payroll, and sales tax. Filter by entity type, add any date to your calendar. Dates from IRS, FTB, CDTFA and EDD." />
+  <meta property="og:title" content="2026 California Small-Business Tax Deadline Calendar" />
+  <meta property="og:description" content="Federal & California 2026 deadlines — income, estimated, payroll, sales tax — filterable by entity, with add-to-calendar. Sourced from IRS, FTB, CDTFA, EDD." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jparkassociates.com/tools/2026-california-small-business-tax-deadlines.html" />
+  <meta property="og:image" content="https://jparkassociates.com/assets/og-image.jpg" />
+  <meta property="og:site_name" content="J Park & Associates" />
+  <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="2026 California Small-Business Tax Deadline Calendar" />
+  <meta name="twitter:description" content="Federal & California 2026 deadlines — income, estimated, payroll, sales tax — filterable by entity, with add-to-calendar." />
+  <meta name="twitter:image" content="https://jparkassociates.com/assets/og-image.jpg" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="author" content="J Park & Associates" />
+  <link rel="canonical" href="https://jparkassociates.com/tools/2026-california-small-business-tax-deadlines.html" />
+  <link rel="icon" href="../assets/favicon/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon/favicon-32.png" />
+  <link rel="apple-touch-icon" href="../assets/favicon/apple-touch-icon-180.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600;1,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css?v=10" />
+  <link rel="stylesheet" href="../blog.css?v=2" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://jparkassociates.com/" },
+      { "@type": "ListItem", "position": 2, "name": "Free Tools", "item": "https://jparkassociates.com/tools/" },
+      { "@type": "ListItem", "position": 3, "name": "2026 Tax Deadline Calendar", "item": "https://jparkassociates.com/tools/2026-california-small-business-tax-deadlines.html" }
+    ]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "When are S-corporation and partnership tax returns due in 2026?", "acceptedAnswer": { "@type": "Answer", "text": "Calendar-year S-corporation (Form 1120-S) and partnership (Form 1065) returns are due March 16, 2026, because the normal March 15 date falls on a Sunday." } },
+      { "@type": "Question", "name": "When is the individual tax deadline in 2026?", "acceptedAnswer": { "@type": "Answer", "text": "The 2025 individual income tax return (Form 1040) and the first 2026 estimated tax payment are due April 15, 2026." } },
+      { "@type": "Question", "name": "When is California's $800 LLC tax due in 2026?", "acceptedAnswer": { "@type": "Answer", "text": "For a calendar-year LLC, the $800 annual tax (Form 3522) is due April 15, 2026, and the LLC fee estimate (Form 3536) is due June 15, 2026." } }
+    ]
+  }
+  </script>
+  <style>
+    /* ---- Deadline calendar (scoped) ---- */
+    .cal-wrap { max-width: 840px; margin: 22px auto 0; }
+    .cal-controls {
+      background: var(--white); border: 1px solid rgba(27,42,74,0.10); border-radius: var(--radius);
+      box-shadow: var(--shadow-soft); padding: 20px 22px; margin-bottom: 20px;
+    }
+    .cal-controls .row { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-end; }
+    .cal-controls .fld { flex: 1 1 220px; }
+    .cal-controls label.flabel { display: block; font-weight: 600; color: var(--navy-900); font-size: 0.9rem; margin: 0 0 7px; }
+    .cal-controls select { border: 1.5px solid rgba(27,42,74,0.18); border-radius: 10px; padding: 9px 12px; background: var(--cream-50); font: 500 0.95rem var(--sans); color: var(--navy-900); width: 100%; }
+    .cat-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .cat-chips label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border: 1.5px solid rgba(27,42,74,0.18); border-radius: 999px; padding: 6px 12px; font-size: 0.84rem; color: var(--slate-600); background: var(--cream-50); user-select: none; }
+    .cat-chips input { accent-color: var(--gold-500); width: 14px; height: 14px; }
+    .cat-chips input:checked + span { color: var(--navy-900); font-weight: 600; }
+    .cal-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .btn-small { font-size: 0.83rem; padding: 8px 15px; border-radius: 999px; border: 1.5px solid rgba(27,42,74,0.2); background: var(--white); color: var(--navy-900); font-weight: 600; cursor: pointer; }
+    .btn-small:hover { border-color: var(--gold-500); }
+    .toggle-past { display: inline-flex; align-items: center; gap: 7px; font-size: 0.84rem; color: var(--slate-600); }
+    .toggle-past input { accent-color: var(--gold-500); width: 15px; height: 15px; }
+
+    ul.cal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 11px; }
+    ul.cal-list li {
+      display: flex; gap: 16px; align-items: stretch;
+      background: var(--white); border: 1px solid rgba(27,42,74,0.10); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow-soft);
+    }
+    ul.cal-list li.hidden { display: none; }
+    ul.cal-list li.past { opacity: 0.5; }
+    ul.cal-list li.next { border-color: var(--gold-500); box-shadow: 0 0 0 2px rgba(201,168,76,0.3), var(--shadow-soft); }
+    .date-badge {
+      flex: none; width: 64px; border-radius: 9px; background: var(--navy-900); color: var(--cream-50);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 0; text-align: center;
+    }
+    .date-badge .mo { font: 700 0.72rem var(--sans); letter-spacing: 1.5px; text-transform: uppercase; color: var(--gold-300); }
+    .date-badge .dy { font: 900 1.5rem/1 var(--serif); }
+    .date-badge .yr { font: 500 0.66rem var(--sans); color: rgba(245,240,232,0.6); margin-top: 2px; }
+    .cal-body { flex: 1; min-width: 0; }
+    .cal-body .title { font-weight: 600; color: var(--navy-900); display: block; }
+    .cal-body .dow { color: var(--grey-500); font-weight: 400; font-size: 0.85rem; }
+    .cal-body p { margin: 3px 0 0; font-size: 0.88rem; color: var(--slate-600); }
+    .cal-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 9px; }
+    .pill { font-size: 0.7rem; letter-spacing: 0.3px; text-transform: uppercase; font-weight: 700; border-radius: 5px; padding: 2px 8px; }
+    .pill.federal { background: rgba(46,74,122,0.14); color: var(--navy-700); }
+    .pill.california { background: rgba(201,168,76,0.18); color: #8a6d18; }
+    .pill.cat { background: rgba(27,42,74,0.08); color: var(--slate-600); }
+    .next-badge { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: var(--navy-900); background: var(--gold-500); border-radius: 5px; padding: 2px 8px; }
+    .cal-src { font-size: 0.8rem; font-weight: 600; color: var(--navy-700); text-decoration: underline; }
+    .add-cal { font-size: 0.78rem; font-weight: 600; color: var(--navy-900); background: none; border: 1.5px solid rgba(27,42,74,0.2); border-radius: 999px; padding: 4px 11px; cursor: pointer; }
+    .add-cal:hover { border-color: var(--gold-500); }
+    .cal-empty { text-align: center; color: var(--grey-500); padding: 30px; }
+
+    .notes-box { max-width: 760px; margin: 34px auto 0; }
+    .notes-box h2 { font-size: 1.3rem; margin: 0 0 12px; }
+    .notes-box ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 11px; }
+    .notes-box li { position: relative; padding-left: 24px; font-size: 0.95rem; }
+    .notes-box li::before { content: ""; position: absolute; left: 0; top: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--gold-500); }
+    .notes-box a { color: var(--navy-700); text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <nav class="nav on-light" aria-label="Main">
+    <a class="logo" href="../index.html" aria-label="J Park & Associates — home">
+      <img class="logo-light" src="../assets/brand/logo-horizontal-white-v2.svg" alt="J Park & Associates — Certified Public Accountants" width="2000" height="480" />
+      <img class="logo-dark" src="../assets/brand/logo-horizontal-v2.svg" alt="" aria-hidden="true" width="2000" height="480" />
+    </a>
+    <ul class="nav-links">
+      <li><a href="../index.html#pain">Pain points</a></li>
+      <li><a href="../index.html#industries">Industries</a></li>
+      <li><a href="../index.html#how">How it works</a></li>
+      <li><a href="../blog.html">Insights</a></li>
+      <li><a href="../index.html#contact">Contact</a></li>
+    </ul>
+    <a class="btn btn-gold nav-cta" href="../index.html#stress-test">
+      <span class="label-full">Run the 2-minute stress test</span>
+      <span class="label-short">2-min stress test</span>
+    </a>
+  </nav>
+
+  <header class="article-hero">
+    <div class="container-narrow">
+      <a class="crumb" href="index.html">Free Tools</a>
+      <span class="cat">Calendar</span>
+      <h1>2026 California small-business tax deadline calendar</h1>
+      <div class="post-meta">
+        <span class="src-tag">Federal &amp; California &middot; IRS, FTB, CDTFA, EDD</span>
+        <span class="dot">&middot;</span>
+        <time datetime="2026-06-13">Updated June 2026</time>
+      </div>
+    </div>
+  </header>
+
+  <main class="article-body">
+    <div class="container-narrow">
+      <p>Every federal and California tax deadline a small business faces in 2026 &mdash; income returns, estimated payments, payroll filings, and sales tax &mdash; in one filterable list. Weekend and holiday shifts are already applied (which is why some land a day or two off the &ldquo;normal&rdquo; date). Filter to your entity, and add any deadline straight to your calendar.</p>
+
+      <div class="cal-wrap">
+        <div class="cal-controls">
+          <div class="row">
+            <div class="fld">
+              <label class="flabel" for="entity">Your business type</label>
+              <select id="entity" aria-label="Business type">
+                <option value="all" selected>All business types</option>
+                <option value="soleprop">Sole proprietor / single-member LLC</option>
+                <option value="partnership">Partnership / multi-member LLC</option>
+                <option value="scorp">S-corporation</option>
+                <option value="ccorp">C-corporation</option>
+              </select>
+            </div>
+            <div class="fld">
+              <label class="flabel">Categories</label>
+              <div class="cat-chips" id="catChips">
+                <label><input type="checkbox" data-cat="income" checked /><span>Income tax</span></label>
+                <label><input type="checkbox" data-cat="estimated" checked /><span>Estimated</span></label>
+                <label><input type="checkbox" data-cat="payroll" checked /><span>Payroll</span></label>
+                <label><input type="checkbox" data-cat="sales" checked /><span>Sales tax</span></label>
+                <label><input type="checkbox" data-cat="caentity" checked /><span>CA entity tax</span></label>
+              </div>
+            </div>
+          </div>
+          <div class="cal-actions">
+            <button class="btn-small" id="dlAll" type="button">Download shown as calendar (.ics)</button>
+            <label class="toggle-past"><input type="checkbox" id="showPast" /> Show passed deadlines</label>
+          </div>
+        </div>
+
+        <ul class="cal-list" id="calList" aria-live="polite"></ul>
+        <p class="cal-empty hidden" id="calEmpty">No deadlines match these filters.</p>
+      </div>
+
+      <div class="notes-box">
+        <h2>Notes that trip people up</h2>
+        <ul>
+          <li><strong>Weekend &amp; holiday shifts are applied.</strong> March 15, 2026 is a Sunday, so S-corp and partnership returns move to <strong>March 16</strong>; January 31 and October 31, 2026 are Saturdays, pushing those payroll/sales-tax filings to <strong>February 2</strong> and <strong>November 2</strong>.</li>
+          <li><strong>California estimated tax isn&rsquo;t evenly split.</strong> Individuals pay on a <strong>30% / 40% / 0% / 30%</strong> schedule (April 15, June 15, none in September, January 15) &mdash; not four equal quarters like the IRS. See <a href="https://www.ftb.ca.gov/pay/estimated-tax-payments.html" rel="noopener" target="_blank">FTB estimated tax</a>.</li>
+          <li><strong>The $800 minimum is unavoidable.</strong> LLCs, S-corps, and C-corps owe California&rsquo;s $800 minimum tax even at a loss; the LLC version (Form 3522) is due the 15th day of the 4th month.</li>
+          <li><strong>Extensions move the return, not the payment.</strong> Filing extensions push paperwork to September/October, but tax owed is still due in spring.</li>
+        </ul>
+      </div>
+
+      <div class="sources-box">
+        <span class="label">Sources &mdash; government authorities only</span>
+        <ul>
+          <li><a href="https://www.irs.gov/publications/p509" rel="noopener" target="_blank">IRS &mdash; Publication 509, Tax Calendars (2026)</a></li>
+          <li><a href="https://www.irs.gov/businesses/small-businesses-self-employed/employment-tax-due-dates" rel="noopener" target="_blank">IRS &mdash; Employment tax due dates</a></li>
+          <li><a href="https://www.irs.gov/forms-pubs/about-form-1040-es" rel="noopener" target="_blank">IRS &mdash; Form 1040-ES (estimated tax)</a></li>
+          <li><a href="https://www.ftb.ca.gov/file/when-to-file/due-dates-business.html" rel="noopener" target="_blank">CA FTB &mdash; Business due dates</a></li>
+          <li><a href="https://www.ftb.ca.gov/pay/estimated-tax-payments.html" rel="noopener" target="_blank">CA FTB &mdash; Estimated tax payments</a></li>
+          <li><a href="https://cdtfa.ca.gov/taxes-and-fees/sales-use-tax-returns-filing-dates.htm" rel="noopener" target="_blank">CDTFA &mdash; Sales &amp; use tax filing dates</a></li>
+          <li><a href="https://edd.ca.gov/en/payroll_taxes/required_filings_and_due_dates/" rel="noopener" target="_blank">CA EDD &mdash; Payroll filing due dates</a></li>
+        </ul>
+      </div>
+      <p class="disclaimer">General information for calendar-year businesses, not tax advice for your situation. Fiscal-year filers, semi-weekly payroll depositors, monthly sales-tax filers, and businesses with prepayment obligations have additional or different dates. Always confirm against the agency links above, and talk to a CPA about your specific filing calendar.</p>
+    </div>
+  </main>
+
+  <section class="article-cta">
+    <h2>Or just never think about a deadline again</h2>
+    <p>Every date on this calendar that&rsquo;s in our lane &mdash; payroll, sales tax, estimates, returns &mdash; sits on <em>our</em> calendar when we handle your books. You run the business; we watch the dates.</p>
+    <div class="cta-row">
+      <a class="btn btn-gold" href="../index.html#contact">Book a 15-minute call</a>
+      <a class="btn btn-ghost-light" href="index.html">See all free tools</a>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-grid">
+      <div>
+        <img class="f-logo" src="../assets/brand/logo-horizontal-white-v2.svg" alt="J Park & Associates — Certified Public Accountants" width="2000" height="480" />
+        <p>Books, taxes, and compliance for small businesses — handled, so you can run the business.</p>
+      </div>
+      <div>
+        <h4>Visit</h4>
+        <p>2529 Foothill Blvd. Ste 101<br />La Crescenta, CA 91214</p>
+        <p><a href="tel:+18182481580">(818) 248-1580</a></p>
+        <p>Mon&ndash;Fri &middot; 9 AM &ndash; 5:30 PM</p>
+      </div>
+      <div>
+        <h4>Reach us</h4>
+        <ul>
+          <li><a href="mailto:justinpark@jparkassociates.com">justinpark@jparkassociates.com</a></li>
+          <li><a href="tel:+18182481580">(818) 248-1580</a></li>
+          <li><a href="s-corp-vs-llc-calculator.html">S-corp vs. LLC calculator</a></li>
+          <li><a href="../blog.html">The Ledger — insights</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 J Park &amp; Associates &middot; Certified Public Accountants</span>
+      <span>La Crescenta &middot; Los Angeles</span>
+    </div>
+  </footer>
+
+  <script>
+  (function () {
+    "use strict";
+    // date strings already weekend/holiday-adjusted for 2026 (verified vs IRS Pub 509, FTB, CDTFA, EDD)
+    var MO = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    var DOW = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    // D = {date, dow, title, desc, scope:'federal'|'california', cats:[], entities:[] | 'all', src:{t,u}}
+    var DATA = [
+      { date:"2026-01-15", title:"Q4 2025 estimated tax payment", desc:"Final 2025 estimated payment for individuals and pass-through owners (federal 1040-ES and California).", scope:"federal", cats:["estimated"], entities:"all", src:{t:"IRS 1040-ES", u:"https://www.irs.gov/forms-pubs/about-form-1040-es"} },
+      { date:"2026-02-02", title:"W-2s & 1099-NEC due; Q4 2025 payroll (941) & FUTA (940)", desc:"Furnish/file W-2s and 1099-NEC, and file Q4 2025 payroll returns. Jan 31 is a Saturday, so the deadline is Feb 2.", scope:"federal", cats:["payroll"], entities:"all", src:{t:"IRS employment tax dates", u:"https://www.irs.gov/businesses/small-businesses-self-employed/employment-tax-due-dates"} },
+      { date:"2026-03-16", title:"S-corp (1120-S) & partnership (1065) returns", desc:"Calendar-year S-corp and partnership federal returns, and CA Form 100S. March 15 is a Sunday, so it moves to March 16.", scope:"federal", cats:["income"], entities:["scorp","partnership"], src:{t:"IRS Pub 509", u:"https://www.irs.gov/publications/p509"} },
+      { date:"2026-04-15", title:"Individual return (Form 1040) & IRA/HSA contributions", desc:"2025 personal income tax return — where sole proprietors report business income on Schedule C.", scope:"federal", cats:["income"], entities:["soleprop"], src:{t:"IRS Pub 509", u:"https://www.irs.gov/publications/p509"} },
+      { date:"2026-04-15", title:"C-corporation return (Form 1120)", desc:"Calendar-year C-corporation federal income tax return.", scope:"federal", cats:["income"], entities:["ccorp"], src:{t:"IRS Pub 509", u:"https://www.irs.gov/publications/p509"} },
+      { date:"2026-04-15", title:"Q1 2026 estimated tax payment", desc:"First 2026 estimated payment (federal; California 30% installment).", scope:"federal", cats:["estimated"], entities:"all", src:{t:"IRS 1040-ES", u:"https://www.irs.gov/forms-pubs/about-form-1040-es"} },
+      { date:"2026-04-15", title:"California $800 minimum tax", desc:"LLC annual tax (Form 3522) and the first-installment minimum franchise tax for S-corps and corporations.", scope:"california", cats:["caentity"], entities:["soleprop","partnership","scorp","ccorp"], src:{t:"CA FTB — LLC tax", u:"https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html"} },
+      { date:"2026-04-30", title:"Q1 payroll returns (941 / CA DE 9)", desc:"First-quarter federal and California payroll tax returns.", scope:"federal", cats:["payroll"], entities:"all", src:{t:"CA EDD due dates", u:"https://edd.ca.gov/en/payroll_taxes/required_filings_and_due_dates/"} },
+      { date:"2026-04-30", title:"Q1 sales & use tax return", desc:"First-quarter CDTFA sales and use tax return (quarterly filers).", scope:"california", cats:["sales"], entities:"all", src:{t:"CDTFA filing dates", u:"https://cdtfa.ca.gov/taxes-and-fees/sales-use-tax-returns-filing-dates.htm"} },
+      { date:"2026-06-15", title:"Q2 2026 estimated tax payment", desc:"Second 2026 estimated payment (federal; California 40% installment).", scope:"federal", cats:["estimated"], entities:"all", src:{t:"IRS 1040-ES", u:"https://www.irs.gov/forms-pubs/about-form-1040-es"} },
+      { date:"2026-06-15", title:"California LLC fee estimate (Form 3536)", desc:"Estimated LLC fee due for LLCs with total income of $250,000 or more.", scope:"california", cats:["caentity"], entities:["soleprop","partnership"], src:{t:"CA FTB — LLC fee", u:"https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html"} },
+      { date:"2026-07-31", title:"Q2 payroll returns (941 / CA DE 9)", desc:"Second-quarter federal and California payroll tax returns.", scope:"federal", cats:["payroll"], entities:"all", src:{t:"CA EDD due dates", u:"https://edd.ca.gov/en/payroll_taxes/required_filings_and_due_dates/"} },
+      { date:"2026-07-31", title:"Q2 sales & use tax return", desc:"Second-quarter CDTFA sales and use tax return.", scope:"california", cats:["sales"], entities:"all", src:{t:"CDTFA filing dates", u:"https://cdtfa.ca.gov/taxes-and-fees/sales-use-tax-returns-filing-dates.htm"} },
+      { date:"2026-09-15", title:"Q3 2026 estimated tax payment", desc:"Third federal estimated payment (California individuals make no September payment; corporations do).", scope:"federal", cats:["estimated"], entities:"all", src:{t:"IRS 1040-ES", u:"https://www.irs.gov/forms-pubs/about-form-1040-es"} },
+      { date:"2026-09-15", title:"Extended S-corp & partnership returns", desc:"Final deadline for calendar-year S-corp/partnership returns on extension.", scope:"federal", cats:["income"], entities:["scorp","partnership"], src:{t:"IRS Pub 509", u:"https://www.irs.gov/publications/p509"} },
+      { date:"2026-10-15", title:"Extended individual & C-corp returns", desc:"Final deadline for 1040 and 1120 returns on extension.", scope:"federal", cats:["income"], entities:["soleprop","ccorp"], src:{t:"IRS Pub 509", u:"https://www.irs.gov/publications/p509"} },
+      { date:"2026-11-02", title:"Q3 payroll returns (941 / CA DE 9)", desc:"Third-quarter payroll returns. Oct 31 is a Saturday, so the deadline is Nov 2.", scope:"federal", cats:["payroll"], entities:"all", src:{t:"CA EDD due dates", u:"https://edd.ca.gov/en/payroll_taxes/required_filings_and_due_dates/"} },
+      { date:"2026-11-02", title:"Q3 sales & use tax return", desc:"Third-quarter CDTFA sales and use tax return. Oct 31 is a Saturday, so the deadline is Nov 2.", scope:"california", cats:["sales"], entities:"all", src:{t:"CDTFA filing dates", u:"https://cdtfa.ca.gov/taxes-and-fees/sales-use-tax-returns-filing-dates.htm"} },
+      { date:"2027-01-15", title:"Q4 2026 estimated tax payment", desc:"Final 2026 estimated payment (federal 1040-ES and California).", scope:"federal", cats:["estimated"], entities:"all", src:{t:"IRS 1040-ES", u:"https://www.irs.gov/forms-pubs/about-form-1040-es"} },
+      { date:"2027-02-01", title:"Q4 2026 payroll & sales-tax returns", desc:"Year-end payroll (941/DE 9), W-2/1099, and Q4 sales tax. Jan 31, 2027 is a Sunday, so the deadline is Feb 1.", scope:"federal", cats:["payroll","sales"], entities:"all", src:{t:"IRS employment tax dates", u:"https://www.irs.gov/businesses/small-businesses-self-employed/employment-tax-due-dates"} }
+    ];
+
+    function todayISO() {
+      var d = new Date();
+      return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+    }
+    function dowOf(iso) { return DOW[new Date(iso + "T00:00:00Z").getUTCDay()]; }
+
+    var entity = document.getElementById("entity");
+    var catChips = document.getElementById("catChips");
+    var showPast = document.getElementById("showPast");
+    var list = document.getElementById("calList");
+    var empty = document.getElementById("calEmpty");
+
+    function selectedCats() {
+      return Array.prototype.slice.call(catChips.querySelectorAll("input:checked")).map(function (c) { return c.getAttribute("data-cat"); });
+    }
+    function entMatch(item, e) {
+      if (e === "all") return true;
+      if (item.entities === "all") return true;
+      return item.entities.indexOf(e) > -1;
+    }
+    function filtered() {
+      var e = entity.value, cats = selectedCats(), today = todayISO(), past = showPast.checked;
+      return DATA.filter(function (it) {
+        if (!entMatch(it, e)) return false;
+        if (!it.cats.some(function (c) { return cats.indexOf(c) > -1; })) return false;
+        if (!past && it.date < today) return false;
+        return true;
+      });
+    }
+
+    function icsEscape(s) { return String(s).replace(/[\\;,]/g, function (m) { return "\\" + m; }).replace(/\n/g, "\\n"); }
+    function ymd(iso) { return iso.replace(/-/g, ""); }
+    function nextYmd(iso) {
+      var d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1);
+      return d.getUTCFullYear() + String(d.getUTCMonth()+1).padStart(2,"0") + String(d.getUTCDate()).padStart(2,"0");
+    }
+    function icsEvent(it) {
+      return [
+        "BEGIN:VEVENT",
+        "UID:" + ymd(it.date) + "-" + Math.abs(hash(it.title)) + "@jparkassociates.com",
+        "DTSTART;VALUE=DATE:" + ymd(it.date),
+        "DTEND;VALUE=DATE:" + nextYmd(it.date),
+        "SUMMARY:" + icsEscape("Tax deadline: " + it.title),
+        "DESCRIPTION:" + icsEscape(it.desc + " (via jparkassociates.com)"),
+        "END:VEVENT"
+      ].join("\r\n");
+    }
+    function hash(s) { var h = 0, i; for (i = 0; i < s.length; i++) { h = (h << 5) - h + s.charCodeAt(i); h |= 0; } return h; }
+    function downloadICS(items, name) {
+      var body = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//J Park & Associates//Tax Deadlines 2026//EN","CALSCALE:GREGORIAN"]
+        .concat(items.map(icsEvent)).concat(["END:VCALENDAR"]).join("\r\n");
+      var blob = new Blob([body], { type: "text/calendar;charset=utf-8" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    function render() {
+      var items = filtered(), today = todayISO();
+      list.innerHTML = "";
+      empty.classList.toggle("hidden", items.length > 0);
+      var nextMarked = false;
+      items.forEach(function (it) {
+        var parts = it.date.split("-");
+        var isPast = it.date < today;
+        var isNext = !isPast && !nextMarked; if (isNext) nextMarked = true;
+        var li = document.createElement("li");
+        li.className = "cal-list-item" + (isPast ? " past" : "") + (isNext ? " next" : "");
+        var scopePill = it.scope === "california" ? '<span class="pill california">California</span>' : '<span class="pill federal">Federal</span>';
+        var catPills = it.cats.map(function (c) {
+          var lbl = { income:"Income", estimated:"Estimated", payroll:"Payroll", sales:"Sales tax", caentity:"CA entity" }[c];
+          return '<span class="pill cat">' + lbl + "</span>";
+        }).join("");
+        li.innerHTML =
+          '<div class="date-badge"><span class="mo">' + MO[+parts[1]-1] + '</span><span class="dy">' + (+parts[2]) + '</span><span class="yr">' + parts[0] + '</span></div>' +
+          '<div class="cal-body">' +
+            '<span class="title">' + it.title + ' <span class="dow">&middot; ' + dowOf(it.date) + '</span></span>' +
+            '<p>' + it.desc + '</p>' +
+            '<div class="cal-meta">' +
+              (isNext ? '<span class="next-badge">Next up</span>' : '') +
+              scopePill + catPills +
+              '<a class="cal-src" href="' + it.src.u + '" rel="noopener" target="_blank">' + it.src.t + '</a>' +
+              '<button class="add-cal" type="button">+ Add to calendar</button>' +
+            '</div>' +
+          '</div>';
+        li.querySelector(".add-cal").addEventListener("click", function () {
+          downloadICS([it], "tax-deadline-" + it.date + ".ics");
+        });
+        list.appendChild(li);
+      });
+    }
+
+    entity.addEventListener("change", render);
+    catChips.addEventListener("change", render);
+    showPast.addEventListener("change", render);
+    document.getElementById("dlAll").addEventListener("click", function () {
+      var items = filtered();
+      if (items.length) downloadICS(items, "jpa-2026-tax-deadlines.ics");
+    });
+
+    render();
+  })();
+  </script>
+
+</body>
+</html>
