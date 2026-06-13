@@ -364,7 +364,7 @@ function initStressTest() {
   });
 
   /* Stress-test email capture — submits to Web3Forms.
-     Register jasonpark@jparkassociates.com at web3forms.com, copy the
+     Register justinpark@jparkassociates.com at web3forms.com, copy the
      access_key here and into #contact-form below. */
   const WEB3_KEY = "f157657a-37a9-47ec-9b50-3b8960d41025";
   const form = document.getElementById("stress-email-form");
@@ -402,14 +402,14 @@ function initStressTest() {
       });
       const data = await res.json();
       if (data.success) {
-        msg.textContent = "Got it — look for a message from jasonpark@jparkassociates.com, usually within one business day.";
+        msg.textContent = "Got it — look for a message from justinpark@jparkassociates.com, usually within one business day.";
         msg.className = "form-msg ok";
         form.reset();
       } else {
         throw new Error(data.message);
       }
     } catch {
-      msg.textContent = "Something went wrong — please email jasonpark@jparkassociates.com directly.";
+      msg.textContent = "Something went wrong — please email justinpark@jparkassociates.com directly.";
       msg.className = "form-msg err";
     } finally {
       submitBtn.disabled = false;
@@ -460,14 +460,14 @@ function initContactForm() {
       });
       const data = await res.json();
       if (data.success) {
-        msg.textContent = "Message sent — you’ll hear from jasonpark@jparkassociates.com within one business day.";
+        msg.textContent = "Message sent — you’ll hear from justinpark@jparkassociates.com within one business day.";
         msg.className = "form-msg ok";
         form.reset();
       } else {
         throw new Error(data.message);
       }
     } catch {
-      msg.textContent = "Something went wrong — please email jasonpark@jparkassociates.com directly.";
+      msg.textContent = "Something went wrong — please email justinpark@jparkassociates.com directly.";
       msg.className = "form-msg err";
     } finally {
       submitBtn.disabled = false;

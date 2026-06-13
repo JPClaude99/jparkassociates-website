@@ -54,7 +54,7 @@ A static server is required — the frame sequences won't load from `file://`.
 ## Confirmed details
 
 - Phone: (818) 248-1580 (`tel:+18182481580`)
-- Email: jasonpark@jparkassociates.com
+- Email: justinpark@jparkassociates.com
 - Address: 2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214
 
 ## The blog ("The Ledger") and the article automation
