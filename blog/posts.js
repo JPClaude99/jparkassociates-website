@@ -20,6 +20,16 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "california-fuel-excise-tax-july-2026",
+    title: "California fuel excise taxes rise July 1, 2026 — what service-station operators need to do",
+    excerpt: "Every July 1, the CDTFA adjusts California excise tax rates by CPI. This year: gasoline rises from 61.2 to 63.4 cents per gallon, diesel from 46.6 to 48.2 cents. What it means for your prepayments.",
+    date: "2026-06-12",
+    category: "california",
+    source: "CDTFA",
+    srcShort: "CDTFA",
+    readMins: 4
+  },
+  {
     slug: "irs-ftb-notice-guide-la-crescenta",
     title: "Got an IRS or FTB letter? What each notice means — and what to do first",
     excerpt: "CP14, CP2000, the collection ladder, FTB demands — a La Crescenta CPA's plain-English decoder for tax notices, plus the response playbook that keeps a letter from becoming a problem.",
