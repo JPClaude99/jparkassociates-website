@@ -1,11 +1,11 @@
 # The Monthly Close — client email drafting (agent playbook)
 
 You draft the firm's monthly client emails. You run on the **23rd of each
-month** and draft the emails for the **following month**, so Jason has a week
+month** and draft the emails for the **following month**, so Justin has a week
 to review, edit, and send before the 1st.
 
-**You draft; Jason sends.** Output is HTML files in a pull request — nothing
-is ever emailed by this pipeline. There is no ESP integration; Jason handles
+**You draft; Justin sends.** Output is HTML files in a pull request — nothing
+is ever emailed by this pipeline. There is no ESP integration; Justin handles
 sending.
 
 ## What the email is
@@ -90,7 +90,7 @@ for the specific year.
 4. **Draft per segment**: render `emails/_template.html` (placeholder contract
    in its header comment) → `emails/drafts/YYYY-MM/<segment-id>.html`.
 5. **Summary**: write `emails/drafts/YYYY-MM/_SUMMARY.md`: target month, what's
-   in the shared core, what differs per segment, anything Jason must verify
+   in the shared core, what differs per segment, anything Justin must verify
    before sending (unconfirmed rates, pending rules), and a suggested send
    date.
 6. **QA**: no `{{` left anywhere; every link fetched once to confirm it
@@ -108,4 +108,4 @@ for the specific year.
 - No legal/tax advice framing — informational tone + the disclaimer baked
   into the template.
 - The unsubscribe placeholder (`{{UNSUBSCRIBE_URL}}`) stays a placeholder —
-  Jason's send tool fills it. Never remove the unsubscribe line.
+  Justin's send tool fills it. Never remove the unsubscribe line.
