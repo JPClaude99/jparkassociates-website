@@ -64,7 +64,7 @@ the whole Crescenta Valley, not just one ZIP.
 - JSON-LD: `AccountingService` on the homepage, `Article` per post, `Blog` on
   the index.
 
-## Off-site (Jason's side — the site can't do these)
+## Off-site (Justin's side — the site can't do these)
 
 - **Google Business Profile** is the #1 lever for "CPA near me" queries:
   claim/verify, exact NAP (2529 Foothill Blvd. Ste 101, La Crescenta, CA

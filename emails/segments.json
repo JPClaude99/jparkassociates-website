@@ -1,5 +1,5 @@
 {
-  "_comment": "Client segments for The Monthly Close (see automation/EMAILS.md). One email is drafted per active segment per month. Jason: edit freely — set active:false to skip a segment, add locations to narrow local notes, or add segments (e.g., split a segment by city) and the next run picks them up.",
+  "_comment": "Client segments for The Monthly Close (see automation/EMAILS.md). One email is drafted per active segment per month. Justin: edit freely — set active:false to skip a segment, add locations to narrow local notes, or add segments (e.g., split a segment by city) and the next run picks them up.",
   "segments": [
     {
       "id": "general",
