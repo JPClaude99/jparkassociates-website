@@ -176,7 +176,7 @@
           throw new Error(data.message);
         }
       } catch (err) {
-        msg.textContent = "Something went wrong — email jasonpark@jparkassociates.com and we'll add you.";
+        msg.textContent = "Something went wrong — email justinpark@jparkassociates.com and we'll add you.";
         msg.className = "form-msg err";
       } finally {
         submitBtn.disabled = false;
