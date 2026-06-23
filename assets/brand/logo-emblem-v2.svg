@@ -1,9 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
   <circle cx="500" cy="500" r="500" fill="#1B2A4A"/>
   <circle cx="500" cy="500" r="452" fill="none" stroke="#C9A84C" stroke-width="7"/>
-  <text x="500" y="500" text-anchor="middle" dominant-baseline="central"
-        font-family="Playfair Display Black" font-size="430" fill="#F5F0E8" letter-spacing="-10">JP</text>
-  <rect x="392" y="730" width="216" height="5" fill="#C9A84C"/>
-  <text x="500" y="800" text-anchor="middle" dominant-baseline="central"
-        font-family="Liberation Sans" font-weight="bold" font-size="60" fill="#C9A84C" letter-spacing="14">&amp; ASSOC.</text>
+  <path d="M-25 -188V-167Q11 -162 38.0 -143.5Q65 -125 79.5 -78.5Q94 -32 94 55V602Q94 639 89.0 656.5Q84 674 68.5 680.5Q53 687 23 688V708Q50 707 95.0 706.0Q140 705 190 705Q240 705 288.5 706.0Q337 707 368 708V688Q338 687 322.5 680.5Q307 674 302.0 656.5Q297 639 297 602V236Q297 195 297.5 147.5Q298 100 294.5 55.0Q291 10 280 -25Q258 -94 183.0 -141.0Q108 -188 -25 -188ZM418 708Q447 707 494.5 706.0Q542 705 590 705Q640 705 686.0 706.0Q732 707 751 707Q903 707 977.5 652.0Q1052 597 1052 510Q1052 474 1037.0 434.5Q1022 395 986.0 361.5Q950 328 887.5 307.0Q825 286 729 286H623V306H719Q770 306 796.5 333.0Q823 360 832.5 404.0Q842 448 842 499Q842 594 820.5 641.0Q799 688 746 688Q712 688 702.0 671.0Q692 654 692 602V116Q692 75 700.5 55.0Q709 35 733.0 29.0Q757 23 803 23V0Q769 1 714.0 2.0Q659 3 597 3Q551 3 505.0 2.0Q459 1 418 0V20Q449 22 464.0 28.0Q479 34 484.0 52.0Q489 70 489 106V602Q489 639 484.0 656.5Q479 674 463.5 680.5Q448 687 418 688Z" transform="translate(279.195,611.800) scale(0.430000,-0.430000)" fill="#F5F0E8"/>
+  <rect x="275.2" y="717.3" width="449.7" height="5" fill="#C9A84C"/>
+  <text x="500" y="758.2" text-anchor="middle" dominant-baseline="central" font-family="Liberation Sans, Arial, sans-serif" font-weight="bold" font-size="49.7" fill="#C9A84C" letter-spacing="6.96">&amp; ASSOCIATES</text>
 </svg>
