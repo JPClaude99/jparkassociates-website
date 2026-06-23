@@ -543,6 +543,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let wheelLatched = false;  /* collapses one wheel/inertia burst into one jump */
   let wheelQuiet = 0;
   let touchY = null;
+  let sidebarOpen = false;   /* the slide-in menu owns input while open (see initSidebar) */
 
   const VH = () => window.innerHeight;
   const scrollPos = () => (lenis ? lenis.scroll : window.scrollY);
@@ -596,7 +597,7 @@ document.addEventListener("DOMContentLoaded", () => {
        preventDefault-ed (Lenis is also stopped) so the clip can't be
        scrubbed, and one latched gesture becomes one jump. */
     window.addEventListener("wheel", (e) => {
-      if (!engaged) return; /* free scroll everywhere else */
+      if (sidebarOpen || !engaged) return; /* menu open, or free scroll elsewhere */
       e.preventDefault();
       clearTimeout(wheelQuiet);
       wheelQuiet = setTimeout(() => { wheelLatched = false; }, 140);
@@ -606,11 +607,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }, { passive: false });
 
     window.addEventListener("touchstart", (e) => {
-      if (engaged) touchY = e.touches[0].clientY;
+      if (engaged && !sidebarOpen) touchY = e.touches[0].clientY;
     }, { passive: true });
 
     window.addEventListener("touchmove", (e) => {
-      if (!engaged) return;
+      if (sidebarOpen || !engaged) return;
       e.preventDefault();
       if (jumping || touchY === null) return;
       const dy = touchY - e.touches[0].clientY;
@@ -618,7 +619,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, { passive: false });
 
     window.addEventListener("keydown", (e) => {
-      if (!engaged || jumping) return;
+      if (sidebarOpen || !engaged || jumping) return;
       if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault(); jump(1);
       } else if (e.key === "ArrowUp" || e.key === "PageUp") {
@@ -692,4 +693,66 @@ document.addEventListener("DOMContentLoaded", () => {
   initPainNavigator();
   initStressTest();
   initContactForm();
+
+  /* ---------- Slide-in menu sidebar ----------
+     Lives in boot() scope so it can coordinate with Lenis and the snap
+     controller: opening locks page scroll; closing only resumes free scroll
+     when no cinematic panel is engaged; and `sidebarOpen` tells the snap input
+     handlers above to keep their hands off the wheel/touch while the menu is up. */
+  (function initSidebar() {
+    const toggle = document.getElementById("nav-toggle");
+    const sidebar = document.getElementById("sidebar");
+    const scrim = document.getElementById("sidebar-scrim");
+    const closeBtn = document.getElementById("sidebar-close");
+    if (!toggle || !sidebar || !scrim) return;
+    const focusable = () => [...sidebar.querySelectorAll("a[href], button")];
+    let lastFocus = null;
+
+    function open() {
+      if (sidebarOpen) return;
+      sidebarOpen = true;
+      lastFocus = document.activeElement;
+      sidebar.classList.add("is-open");
+      scrim.classList.add("is-open");
+      toggle.classList.add("is-open");
+      toggle.setAttribute("aria-expanded", "true");
+      sidebar.setAttribute("aria-hidden", "false");
+      if (lenis) lenis.stop();
+      const f = closeBtn || focusable()[0];
+      if (f) f.focus();
+    }
+    function close(restoreFocus) {
+      if (!sidebarOpen) return;
+      sidebarOpen = false;
+      sidebar.classList.remove("is-open");
+      scrim.classList.remove("is-open");
+      toggle.classList.remove("is-open");
+      toggle.setAttribute("aria-expanded", "false");
+      sidebar.setAttribute("aria-hidden", "true");
+      if (lenis && !engaged) lenis.start(); /* don't break a cinematic lock */
+      if (restoreFocus !== false && lastFocus) lastFocus.focus();
+    }
+
+    toggle.addEventListener("click", () => (sidebarOpen ? close() : open()));
+    scrim.addEventListener("click", () => close());
+    if (closeBtn) closeBtn.addEventListener("click", () => close());
+
+    /* A link closes the menu; for in-page (#) links the anchor handler above
+       also fires and manages the smooth scroll, so don't yank focus back. */
+    sidebar.querySelectorAll("a[href]").forEach((a) => {
+      a.addEventListener("click", () => close(false));
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (!sidebarOpen) return;
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key === "Tab") {
+        const f = focusable();
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
+  })();
 });
