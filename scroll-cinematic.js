@@ -519,6 +519,10 @@ document.addEventListener("DOMContentLoaded", () => {
     .map(initCinematic);
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  /* The snap/scroll-lock is a wheel-pointer interaction. On touch it fights the
+     browser's native scrolling and can trap the page, so touch devices keep plain
+     native scrolling and instead auto-play each clip as its panel enters view. */
+  const isTouch = window.matchMedia("(pointer: coarse)").matches;
   const navUpdate = initNavTheme();
 
   /* Lenis is self-hosted, but if it ever fails to load the site must
@@ -536,7 +540,7 @@ document.addEventListener("DOMContentLoaded", () => {
      — JUMPS one viewport past it to the next section. Everything outside the
      cinematic panels scrolls normally. (Disabled under reduced motion, where
      each panel just shows its final frame and the page scrolls freely.) */
-  const snapEnabled = !reducedMotion && cinematics.length > 0;
+  const snapEnabled = !reducedMotion && cinematics.length > 0 && !isTouch;
   let engaged = null;        /* the cinematic that currently owns the screen */
   let jumping = false;       /* a programmatic snap/jump is animating */
   let cooldownUntil = 0;     /* brief guard so a jump can't instantly re-engage */
@@ -630,6 +634,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (reducedMotion) cinematics.forEach((c) => c.showFinal());
 
+  /* Touch / no-snap path: native scrolling is left completely alone; each
+     cinematic clip simply plays once whenever its panel scrolls into view. */
+  if (!reducedMotion && !snapEnabled && cinematics.length) {
+    cinematics.forEach((c) => {
+      let visible = false;
+      new IntersectionObserver((entries) => {
+        const nowVisible = entries[0].isIntersecting && entries[0].intersectionRatio >= 0.45;
+        if (nowVisible && !visible) c.play();
+        visible = nowVisible;
+      }, { threshold: [0, 0.45, 0.9] }).observe(c.el);
+    });
+  }
+
   function raf(t) {
     if (lenis) lenis.raf(t);
     cinematics.forEach((c) => c.tick(t));
@@ -717,6 +734,7 @@ document.addEventListener("DOMContentLoaded", () => {
       toggle.classList.add("is-open");
       toggle.setAttribute("aria-expanded", "true");
       sidebar.setAttribute("aria-hidden", "false");
+      document.documentElement.style.overflow = "hidden"; /* lock background, incl. native touch scroll */
       if (lenis) lenis.stop();
       const f = closeBtn || focusable()[0];
       if (f) f.focus();
@@ -729,6 +747,7 @@ document.addEventListener("DOMContentLoaded", () => {
       toggle.classList.remove("is-open");
       toggle.setAttribute("aria-expanded", "false");
       sidebar.setAttribute("aria-hidden", "true");
+      document.documentElement.style.overflow = "";
       if (lenis && !engaged) lenis.start(); /* don't break a cinematic lock */
       if (restoreFocus !== false && lastFocus) lastFocus.focus();
     }
