@@ -29,7 +29,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="styles.css?v=11" />
   <link rel="preload" as="image" href="frames/hero/frame_0001.webp?v=2" fetchpriority="high" />
   <script type="application/ld+json">
   {
@@ -76,11 +76,44 @@
       <li><a href="blog.html">Insights</a></li>
       <li><a href="#contact">Contact</a></li>
     </ul>
-    <a class="btn btn-gold nav-cta" href="#stress-test">
-      <span class="label-full">Run the 2-minute stress test</span>
-      <span class="label-short">2-min stress test</span>
-    </a>
+    <div class="nav-right">
+      <a class="btn btn-gold nav-cta" href="#stress-test">
+        <span class="label-full">Run the 2-minute stress test</span>
+        <span class="label-short">2-min stress test</span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+    </div>
   </nav>
+
+  <!-- ============ Slide-in menu sidebar ============ -->
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <aside class="sidebar" id="sidebar" aria-label="Site menu" aria-hidden="true">
+    <div class="sidebar-top">
+      <span class="sidebar-eyebrow">J Park &amp; Associates</span>
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close menu">&times;</button>
+    </div>
+    <nav class="sidebar-links" aria-label="Site sections">
+      <a href="#hero">Home</a>
+      <a href="#pain">Pain points</a>
+      <a href="#before-after">What changes</a>
+      <a href="#industries">Industries</a>
+      <a href="#proof">Results</a>
+      <a href="#how">How it works</a>
+      <a href="blog.html">The Ledger &mdash; insights</a>
+      <a href="tools/index.html">Tools &amp; calculators</a>
+      <a href="#contact">Contact</a>
+    </nav>
+    <a class="btn btn-gold sidebar-cta" href="#stress-test">Free 2-minute stress test</a>
+    <div class="sidebar-contact">
+      <a href="tel:+18182481580">(818)&nbsp;248-1580</a>
+      <a href="mailto:justinpark@jparkassociates.com">justinpark@jparkassociates.com</a>
+      <span>2529 Foothill Blvd. Ste 101<br />La Crescenta, CA 91214</span>
+    </div>
+  </aside>
 
   <!-- ============ Cinematic hero — gold ring orbit ============ -->
   <section class="cinematic" id="hero" aria-label="Introduction">
@@ -464,7 +497,6 @@
 
   <script src="assets/vendor/lenis.min.js"></script>
   <script>
-    const _mob = window.matchMedia('(max-width: 760px)').matches;
     window.SCRUB_SECTIONS = [
       {
         section: "#hero",
@@ -472,9 +504,10 @@
         duration: 6500, /* ms for the one play-through when the panel engages */
         bg: "#111c33",
         filter: "brightness(1.04) contrast(1.09) saturate(1.15)",
-        framePath: _mob
-          ? (i) => `frames/hero-mobile/frame_${String(i).padStart(4, "0")}.webp`
-          : (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp?v=2`
+        /* Mobile uses the same landscape hero asset as desktop (cover-fit crops
+           to the centered ring), so phones get the AI-2K clip and the identical
+           play-on-enter behavior — no separate portrait sequence. */
+        framePath: (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp?v=2`
       },
       {
         section: "#order",
@@ -482,12 +515,10 @@
         duration: 5400,
         bg: "#111c33",
         filter: "brightness(1.02) contrast(1.06) saturate(1.08)",
-        framePath: _mob
-          ? (i) => `frames/order-mobile/frame_${String(i).padStart(4, "0")}.webp`
-          : (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp?v=2`
+        framePath: (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp?v=2`
       }
     ];
   </script>
-  <script src="scroll-cinematic.js?v=9"></script>
+  <script src="scroll-cinematic.js?v=10"></script>
 </body>
 </html>
