@@ -78,7 +78,7 @@ calibration. The rules they embody:
   per article, placed in title/h1/slug/description; internal links to and
   from existing articles; California/LA specificity.
 
-## Step 5 — Publish mechanics (three steps, in this order)
+## Step 5 — Publish mechanics (four steps, in this order)
 
 1. Render `blog/_template.html` — replace every `{{PLACEHOLDER}}` (the contract
    is documented in the template's header comment) — and write the result to
@@ -92,6 +92,13 @@ calibration. The rules they embody:
    announcement-driven).
 3. Append a `<url>` entry for the article to `sitemap.xml` (`lastmod` = the
    publication date).
+4. **Bust the manifest cache.** `blog.html` loads the post manifest with a
+   version query (`<script src="blog/posts.js?v=N">`). Browsers and the CDN key
+   their cache on that exact URL, so a new entry in `posts.js` is invisible to
+   returning visitors until the token changes. **Increment `N` by one** on that
+   manifest `<script>` tag in `blog.html` every run that touches `posts.js`
+   (e.g. `?v=3` → `?v=4`). Leave the unrelated `blog.js?v=` token alone unless
+   you changed `blog.js`.
 
 ## Step 6 — QA checklist (do not skip)
 
@@ -102,6 +109,9 @@ calibration. The rules they embody:
 - [ ] Every `<a href>` in the article points at the real page you fetched
       (fetch each once more to confirm it isn't a 404).
 - [ ] Date in `posts.js` matches `datetime` and the display date in the HTML.
+- [ ] Manifest cache token bumped: `blog/posts.js?v=N` in `blog.html` was
+      incremented (Step 5.4). Without this, the new card won't show for
+      returning visitors.
 - [ ] Serve check if possible: `python -m http.server` + fetch the new page;
       otherwise inspect the HTML structure carefully.
 
