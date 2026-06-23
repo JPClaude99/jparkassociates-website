@@ -54,7 +54,7 @@ const frameLoader = (() => {
   };
 })();
 
-function initScrub(cfg) {
+function initCinematic(cfg) {
   const section = document.querySelector(cfg.section);
   const canvas = section.querySelector("canvas");
   const ctx = canvas.getContext("2d", { alpha: false });
@@ -64,7 +64,6 @@ function initScrub(cfg) {
   const frames = []; /* Blob per frame (or <img> on the legacy path) */
   let frameW = 0, frameH = 0; /* native frame size, known after first decode */
   let current = -1;
-  let lastP = -1;
   let fallbackIdx = -1; /* index of the last-drawn frame; protected from eviction */
 
   /* The color grade lives on the element as a GPU-composited CSS filter.
@@ -188,23 +187,19 @@ function initScrub(cfg) {
     draw(current < 0 ? 0 : current);
   }
 
-  function update() {
-    const rect = section.getBoundingClientRect();
-    const vh = window.innerHeight;
-    /* Far away: free the decoded window (it rebuilds on approach). */
-    if (rect.bottom < -vh * 2 || rect.top > vh * 2) {
-      if (bitmaps.size) releaseBitmaps();
-      return;
-    }
-    const scrollable = rect.height - vh;
-    const p = Math.min(Math.max(-rect.top / scrollable, 0), 1);
-    const idx = Math.min(cfg.frameCount - 1, Math.floor(p * (cfg.frameCount - 1)));
-    if (idx !== current) { current = idx; draw(idx); }
-    ensureDecoded(idx); /* keeps the decode window warm as frames load / scroll moves */
-    if (p === lastP) return; /* nothing visual changed — skip all style writes */
-    lastP = p;
-    /* scaleX instead of width: width invalidated layout every frame, which
-       turned the getBoundingClientRect reads above into forced reflows. */
+  /* ---- Playback model ----
+     The clip plays once when the panel engages, on its own clock. Frame
+     index and the three text reveals are both driven by playback progress
+     p (0→1) — NOT by how far the page is scrolled. The snap controller in
+     boot() calls play()/reset()/showFinal() as the panel engages, leaves,
+     and (under reduced motion) rests. */
+  const duration = cfg.duration || 6000; /* ms for one full play-through */
+  let playing = false;
+  let playStart = 0;
+
+  /* Text reveals: the same triangular-plateau fade the scrub used, now
+     timed off p so the three lines hand off in sequence as the clip plays. */
+  function applyReveals(p) {
     if (progressFill) progressFill.style.transform = `scaleX(${p.toFixed(4)})`;
     for (const el of lines) {
       const a = parseFloat(el.dataset.in), b = parseFloat(el.dataset.out);
@@ -219,6 +214,34 @@ function initScrub(cfg) {
       el.style.pointerEvents = o > 0.5 ? "auto" : "none";
     }
   }
+
+  function renderAt(p) {
+    const idx = Math.min(cfg.frameCount - 1, Math.floor(p * (cfg.frameCount - 1)));
+    if (idx !== current) { current = idx; draw(idx); }
+    ensureDecoded(idx); /* keep the decode window warm ahead of playback */
+    applyReveals(p);
+  }
+
+  /* Driven from the single global rAF (see boot) so there's no per-section
+     timer. Advances the clip while playing; when idle it only frees the
+     decoded window once the panel is well off-screen. */
+  function tick(t) {
+    if (playing) {
+      if (playStart === 0) playStart = t;
+      const p = Math.min((t - playStart) / duration, 1);
+      renderAt(p);
+      if (p >= 1) playing = false; /* hold the final frame + final copy */
+      return;
+    }
+    if (bitmaps.size) {
+      const r = section.getBoundingClientRect(), vh = window.innerHeight;
+      if (r.bottom < -vh * 0.5 || r.top > vh * 1.5) releaseBitmaps();
+    }
+  }
+
+  function play() { playing = true; playStart = 0; ensureDecoded(0); }
+  function reset() { playing = false; playStart = 0; current = -1; renderAt(0); }
+  function showFinal() { playing = false; renderAt(1); } /* reduced-motion rest state */
 
   /* Stride order: cover the whole scrub range coarsely first, then fill
      in. A fast first scroll finds frames spread across the section (the
@@ -244,7 +267,7 @@ function initScrub(cfg) {
 
   window.addEventListener("resize", resize);
   resize();
-  return { update, resize };
+  return { tick, play, reset, showFinal, resize, el: section, cfg };
 }
 
 /* ---------- Stat counters ---------- */
@@ -491,9 +514,9 @@ function initNavTheme() {
 
 /* ---------- Boot ---------- */
 document.addEventListener("DOMContentLoaded", () => {
-  const scrubs = (window.SCRUB_SECTIONS || [])
+  const cinematics = (window.SCRUB_SECTIONS || [])
     .filter((c) => document.querySelector(c.section))
-    .map(initScrub);
+    .map(initCinematic);
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const navUpdate = initNavTheme();
@@ -505,24 +528,133 @@ document.addEventListener("DOMContentLoaded", () => {
     : null;
   window.__lenis = lenis;
 
+  /* ---------- Cinematic snap controller ----------
+     Each cinematic panel is one full-screen "slide". When it covers the
+     viewport it ENGAGES: the clip plays once on its own clock and scroll is
+     locked so the animation can never be scrubbed by the wheel. One
+     deliberate gesture — a wheel notch, a swipe, or an arrow/space/page key
+     — JUMPS one viewport past it to the next section. Everything outside the
+     cinematic panels scrolls normally. (Disabled under reduced motion, where
+     each panel just shows its final frame and the page scrolls freely.) */
+  const snapEnabled = !reducedMotion && cinematics.length > 0;
+  let engaged = null;        /* the cinematic that currently owns the screen */
+  let jumping = false;       /* a programmatic snap/jump is animating */
+  let cooldownUntil = 0;     /* brief guard so a jump can't instantly re-engage */
+  let wheelLatched = false;  /* collapses one wheel/inertia burst into one jump */
+  let wheelQuiet = 0;
+  let touchY = null;
+
+  const VH = () => window.innerHeight;
+  const scrollPos = () => (lenis ? lenis.scroll : window.scrollY);
+
+  function smoothTo(target, cb) {
+    if (lenis) {
+      lenis.start();
+      lenis.scrollTo(target, { duration: 0.9, lock: true, onComplete: () => cb && cb() });
+    } else {
+      window.scrollTo({ top: target, behavior: "smooth" });
+      setTimeout(() => cb && cb(), 700);
+    }
+  }
+
+  function engage(c) {
+    engaged = c;
+    jumping = true;
+    const top = c.el.getBoundingClientRect().top;
+    const settle = () => { jumping = false; if (lenis) lenis.stop(); c.reset(); c.play(); };
+    if (Math.abs(top) < 2) settle();           /* already filling the screen (e.g. load) */
+    else smoothTo(top + scrollPos(), settle);  /* magnetically snap it into place */
+  }
+
+  function jump(dir) {
+    if (!engaged || jumping) return;
+    jumping = true;
+    const base = engaged.el.getBoundingClientRect().top + scrollPos();
+    const target = dir > 0 ? base + VH() : Math.max(0, base - VH());
+    smoothTo(target, () => {
+      jumping = false;
+      engaged = null;
+      cooldownUntil = performance.now() + 260;
+      evaluate(); /* the section we land on may itself be cinematic */
+    });
+  }
+
+  function evaluate() {
+    if (!snapEnabled || jumping || performance.now() < cooldownUntil) return;
+    const center = VH() * 0.5;
+    let cover = null;
+    for (const c of cinematics) {
+      const r = c.el.getBoundingClientRect();
+      if (r.top <= center && r.bottom >= center) { cover = c; break; }
+    }
+    if (cover && cover !== engaged) engage(cover);
+    else if (!cover && engaged) { engaged = null; if (lenis) lenis.start(); }
+  }
+
+  if (snapEnabled) {
+    /* While engaged, every scroll input is captured: wheel/touch are
+       preventDefault-ed (Lenis is also stopped) so the clip can't be
+       scrubbed, and one latched gesture becomes one jump. */
+    window.addEventListener("wheel", (e) => {
+      if (!engaged) return; /* free scroll everywhere else */
+      e.preventDefault();
+      clearTimeout(wheelQuiet);
+      wheelQuiet = setTimeout(() => { wheelLatched = false; }, 140);
+      if (wheelLatched || jumping || Math.abs(e.deltaY) < 4) return;
+      wheelLatched = true;
+      jump(e.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+
+    window.addEventListener("touchstart", (e) => {
+      if (engaged) touchY = e.touches[0].clientY;
+    }, { passive: true });
+
+    window.addEventListener("touchmove", (e) => {
+      if (!engaged) return;
+      e.preventDefault();
+      if (jumping || touchY === null) return;
+      const dy = touchY - e.touches[0].clientY;
+      if (Math.abs(dy) > 44) { touchY = null; jump(dy > 0 ? 1 : -1); }
+    }, { passive: false });
+
+    window.addEventListener("keydown", (e) => {
+      if (!engaged || jumping) return;
+      if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault(); jump(1);
+      } else if (e.key === "ArrowUp" || e.key === "PageUp") {
+        e.preventDefault(); jump(-1);
+      }
+    });
+  }
+
+  if (reducedMotion) cinematics.forEach((c) => c.showFinal());
+
   function raf(t) {
     if (lenis) lenis.raf(t);
-    scrubs.forEach((s) => s.update());
+    cinematics.forEach((c) => c.tick(t));
+    evaluate();
     navUpdate();
     requestAnimationFrame(raf);
   }
   requestAnimationFrame(raf);
 
-  /* Anchor links → smooth scroll via Lenis (native smooth as fallback) */
+  /* Anchor links → smooth scroll via Lenis (native smooth as fallback).
+     Releases any engaged panel first so a locked cinematic never swallows
+     the jump, and re-evaluates on arrival in case the target is cinematic. */
   document.querySelectorAll('a[href^="#"]').forEach((a) => {
     a.addEventListener("click", (e) => {
       const target = document.querySelector(a.getAttribute("href"));
       if (!target) return;
       e.preventDefault();
+      engaged = null;
+      jumping = true;
+      const done = () => { jumping = false; cooldownUntil = performance.now() + 260; evaluate(); };
       if (lenis) {
-        lenis.scrollTo(target, { offset: 0, duration: reducedMotion ? 0 : 1.4 });
+        lenis.start();
+        lenis.scrollTo(target, { offset: 0, duration: reducedMotion ? 0 : 1.4, lock: true, onComplete: done });
       } else {
         target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth" });
+        setTimeout(done, 700);
       }
     });
   });

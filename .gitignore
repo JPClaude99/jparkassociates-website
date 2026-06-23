@@ -1,1 +1,6 @@
 .claude/
+
+# Source/master video assets — build inputs only. The site ships the extracted
+# WebP frame sequences under frames/, never the .mp4 masters. (hero_4k.mp4 alone
+# is ~107 MB, over GitHub's 100 MB hard limit, so committing these breaks pushes.)
+*.mp4
