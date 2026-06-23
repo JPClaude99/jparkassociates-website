@@ -157,8 +157,9 @@ a { color: inherit; }
     linear-gradient(180deg, rgba(10, 16, 30, 0.5) 0%, transparent 24%, transparent 72%, rgba(10, 16, 30, 0.65) 100%);
 }
 
-#hero { height: 312vh; }
-#order { height: 264vh; }
+/* One viewport each: these are play-on-enter panels now, not scroll-scrubbed
+   timelines, so they no longer need extra scroll length to drive the frames. */
+#hero, #order { height: 100vh; height: 100svh; }
 
 .overlay { position: relative; z-index: 10; width: 100%; text-align: center; padding: 0 24px; }
 .reveal-line {

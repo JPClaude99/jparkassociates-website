@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#111c33" />
   <title>J Park &amp; Associates — Small-Business CPAs, La Crescenta &amp; Los Angeles</title>
-  <meta name="description" content="Run your business. We'll handle the numbers. Books, taxes, and compliance for Los Angeles small businesses — handled by J Park & Associates, Certified Public Accountants, for over 15 years." />
+  <meta name="description" content="A small-business CPA in La Crescenta serving the Crescenta Valley and Los Angeles. Bookkeeping, tax, and payroll — handled, so you can run your business." />
   <meta property="og:title" content="J Park & Associates — Run your business. We'll handle the numbers." />
-  <meta property="og:description" content="Books, taxes, and compliance for Los Angeles small businesses — so tax season stops being something you dread." />
+  <meta property="og:description" content="A small-business CPA in La Crescenta — books, taxes, and payroll for the Crescenta Valley and Los Angeles, so tax season stops being something you dread." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://jparkassociates.com/" />
   <meta property="og:image" content="https://jparkassociates.com/assets/og-image.jpg" />
@@ -16,7 +16,7 @@
   <meta property="og:locale" content="en_US" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="J Park & Associates — Run your business. We'll handle the numbers." />
-  <meta name="twitter:description" content="Books, taxes, and compliance for Los Angeles small businesses — so tax season stops being something you dread." />
+  <meta name="twitter:description" content="A small-business CPA in La Crescenta — books, taxes, and payroll for the Crescenta Valley and Los Angeles, so tax season stops being something you dread." />
   <meta name="twitter:image" content="https://jparkassociates.com/assets/og-image.jpg" />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <meta name="author" content="J Park & Associates" />
@@ -30,7 +30,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css?v=10" />
-  <link rel="preload" as="image" href="frames/hero/frame_0001.webp" fetchpriority="high" />
+  <link rel="preload" as="image" href="frames/hero/frame_0001.webp?v=2" fetchpriority="high" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -398,8 +398,8 @@
         <span>or send us a message</span>
       </div>
 
-      <form class="contact-form reveal" id="contact-form" novalidate data-delay="3">
-        <input type="hidden" name="access_key" value="REPLACE_WITH_WEB3FORMS_ACCESS_KEY" />
+      <form class="contact-form reveal" id="contact-form" action="https://api.web3forms.com/submit" method="POST" novalidate data-delay="3">
+        <input type="hidden" name="access_key" value="f157657a-37a9-47ec-9b50-3b8960d41025" />
         <input type="hidden" name="subject" value="New inquiry — jparkassociates.com" />
         <input type="hidden" name="from_name" value="Website Contact Form" />
         <input type="hidden" name="cc" value="justinparkcpa@gmail.com" />
@@ -469,23 +469,25 @@
       {
         section: "#hero",
         frameCount: 193,
+        duration: 6500, /* ms for the one play-through when the panel engages */
         bg: "#111c33",
         filter: "brightness(1.04) contrast(1.09) saturate(1.15)",
         framePath: _mob
           ? (i) => `frames/hero-mobile/frame_${String(i).padStart(4, "0")}.webp`
-          : (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp`
+          : (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp?v=2`
       },
       {
         section: "#order",
         frameCount: 193,
+        duration: 5400,
         bg: "#111c33",
         filter: "brightness(1.02) contrast(1.06) saturate(1.08)",
         framePath: _mob
           ? (i) => `frames/order-mobile/frame_${String(i).padStart(4, "0")}.webp`
-          : (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp`
+          : (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp?v=2`
       }
     ];
   </script>
-  <script src="scroll-cinematic.js?v=8"></script>
+  <script src="scroll-cinematic.js?v=9"></script>
 </body>
 </html>
