@@ -20,6 +20,16 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "la-county-minimum-wage-july-2026",
+    title: "Minimum wage rises July 1, 2026 — what La Crescenta and Glendale employers pay now",
+    excerpt: "Local minimum wages reset July 1: unincorporated L.A. County (La Crescenta, Montrose) hits $18.47, the City of L.A. $18.42, Pasadena $18.57 — while Glendale follows the state $16.90. What you owe depends on where the work happens.",
+    date: "2026-06-22",
+    category: "payroll",
+    source: "Local Wage Law",
+    srcShort: "Wages",
+    readMins: 5
+  },
+  {
     slug: "california-fuel-excise-tax-july-2026",
     title: "California fuel excise taxes rise July 1, 2026 — what service-station operators need to do",
     excerpt: "Every July 1, the CDTFA adjusts California excise tax rates by CPI. This year: gasoline rises from 61.2 to 63.4 cents per gallon, diesel from 46.6 to 48.2 cents. What it means for your prepayments.",
