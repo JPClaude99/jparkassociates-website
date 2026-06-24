@@ -866,8 +866,12 @@ a { color: inherit; }
 @media (max-width: 760px) {
   .nav .logo { height: 46px; }
   .industry-grid { grid-template-columns: 1fr; }
-  #hero { height: 420vh; }
-  #order { height: 360vh; }
+  /* #hero / #order keep the base 100svh here. They were 420vh / 360vh back
+     when the panels were scroll-scrubbed and needed extra scroll length;
+     under the play-on-enter model that left phones scrolling through ~8 dead
+     pinned screens AND kept the clips from ever playing — a 420vh panel tops
+     out near a 0.24 intersection ratio, below the 0.45 the touch auto-play
+     observer waits for. One viewport each fixes both. */
 
   /* Pain-point navigator: horizontal chip strip */
   .pain-cards {
