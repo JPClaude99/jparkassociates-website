@@ -1,6 +1,6 @@
 # July 2026 drafts — summary
 
-**Status: DRAFT — ready for Jason's review.**
+**Status: DRAFT — ready for Justin's review.**
 Drafted by the monthly pipeline on 2026-06-13. All 7 active segments are included.
 
 **Suggested send date: Monday, June 29, 2026** (before the July 1 wage change takes effect).

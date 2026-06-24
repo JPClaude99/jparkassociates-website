@@ -54,15 +54,30 @@ def main():
         sys.exit(f"No .html drafts found in {draft_dir}")
 
     try:
-        from weasyprint import HTML
+        from weasyprint import HTML, default_url_fetcher
         from pypdf import PdfReader, PdfWriter
     except ImportError:
         sys.exit("Missing deps. Run: pip3 install weasyprint pypdf")
 
+    # The drafts reference assets by absolute production URL
+    # (https://jparkassociates.com/assets/...). That host isn't reachable from
+    # the build environment, so without this the header logo fails to load and
+    # WeasyPrint falls back to the alt text in default black — making the PDF
+    # header look broken even though the email itself is fine. Map those URLs
+    # to the local repo copy so the real (white-on-navy) logo renders.
+    site_prefix = "https://jparkassociates.com/"
+
+    def local_first_fetcher(url):
+        if url.startswith(site_prefix):
+            local = repo / url[len(site_prefix):]
+            if local.is_file():
+                return {"file_obj": open(local, "rb"), "mime_type": None}
+        return default_url_fetcher(url)
+
     out_path = Path(args.out) if args.out else draft_dir / f"{args.month}-drafts.pdf"
     writer = PdfWriter()
     for draft in drafts:
-        rendered = HTML(str(draft)).write_pdf()
+        rendered = HTML(str(draft), url_fetcher=local_first_fetcher).write_pdf()
         import io
         for page in PdfReader(io.BytesIO(rendered)).pages:
             writer.add_page(page)
