@@ -196,6 +196,7 @@ function initCinematic(cfg) {
   const duration = cfg.duration || 6000; /* ms for one full play-through */
   let playing = false;
   let playStart = 0;
+  let waitStart = 0; /* when we began holding for the first frame to decode */
 
   /* Text reveals: the same triangular-plateau fade the scrub used, now
      timed off p so the three lines hand off in sequence as the clip plays. */
@@ -225,9 +226,28 @@ function initCinematic(cfg) {
   /* Driven from the single global rAF (see boot) so there's no per-section
      timer. Advances the clip while playing; when idle it only frees the
      decoded window once the panel is well off-screen. */
+  /* Frame 0 is drawable: a decoded bitmap (fast path) or a loaded image
+     (legacy path). The playback clock is gated on this. */
+  function firstFrameReady() {
+    if (USE_BITMAPS) return bitmaps.has(0);
+    return !!(frames[0] && frames[0].complete && frames[0].naturalWidth);
+  }
+
   function tick(t) {
     if (playing) {
-      if (playStart === 0) playStart = t;
+      /* Don't start the clock until frame 0 has decoded — otherwise the
+         wall-clock duration burns down while the opening frames are still
+         loading and the clip jumps in mid-stream (the "lag before it plays").
+         Hold on frame 0, then play from the very start the instant it's ready.
+         A 2s ceiling keeps a slow/failed first frame from stalling forever. */
+      if (playStart === 0) {
+        if (!firstFrameReady()) {
+          if (waitStart === 0) waitStart = t;
+          if (t - waitStart < 2000) { renderAt(0); return; }
+        }
+        playStart = t;
+        waitStart = 0;
+      }
       const p = Math.min((t - playStart) / duration, 1);
       renderAt(p);
       if (p >= 1) playing = false; /* hold the final frame + final copy */
@@ -239,21 +259,18 @@ function initCinematic(cfg) {
     }
   }
 
-  function play() { playing = true; playStart = 0; ensureDecoded(0); }
-  function reset() { playing = false; playStart = 0; current = -1; renderAt(0); }
+  function play() { playing = true; playStart = 0; waitStart = 0; ensureDecoded(0); }
+  function reset() { playing = false; playStart = 0; waitStart = 0; current = -1; renderAt(0); }
   function showFinal() { playing = false; renderAt(1); } /* reduced-motion rest state */
 
-  /* Stride order: cover the whole scrub range coarsely first, then fill
-     in. A fast first scroll finds frames spread across the section (the
-     nearest-frame fallback bridges the gaps) instead of a frozen canvas. */
-  const seq = [];
-  const seen = new Set();
-  for (const stride of [16, 4, 1]) {
-    for (let i = 0; i < cfg.frameCount; i += stride) {
-      if (!seen.has(i)) { seen.add(i); seq.push(i); }
-    }
-  }
-  for (const i of seq) {
+  /* Sequential load order. The old stride pattern (coarse-then-fill) existed
+     for scrubbing, where the user could land on any frame. These panels now
+     play once from frame 0 forward on their own clock, so the frame the clip
+     needs next is simply the next one — fetching in playback order means the
+     opening seconds aren't waiting on frames buried at the back of a strided
+     queue (the desktop "lag before it plays"). Frame 0 is still front-queued
+     so the first frame paints as fast as possible. */
+  for (let i = 0; i < cfg.frameCount; i++) {
     frameLoader.enqueue(cfg.framePath(i + 1), (result) => {
       if (!result) return;
       frames[i] = result;
