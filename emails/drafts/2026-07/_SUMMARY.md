@@ -37,32 +37,30 @@ Drafted by the monthly pipeline on 2026-06-13. All 7 active segments are include
 
 ## Verify before sending
 
-**1. Local minimum-wage rates (HIGH PRIORITY)**
-Rates used in all drafts are from the UC Berkeley Labor Center inventory, fetched 2026-06-13:
-- City of Los Angeles: **$18.42 / hour** (effective Jul 1, 2026)
-- Unincorporated LA County: **$18.47 / hour** (effective Jul 1, 2026)
-- Pasadena: **$18.57 / hour** (effective Jul 1, 2026)
-- Glendale: no local ordinance; follows CA statewide ($16.90, no Jul 1 change)
+**Pre-send verification pass completed 2026-06-24 against live sources. All items below confirmed unless noted.**
 
-Verify these against the official city/county ordinances before sending. Direct sources:
-- City of LA: wagesla.lacity.org
-- LA County: employee.lacounty.gov (HR department)
-- Pasadena: cityofpasadena.net/finance/minimum-wage
+**1. Local minimum-wage rates (HIGH PRIORITY) — ✅ CONFIRMED**
+Verified 2026-06-24 against current sources (City of LA Office of Wage Standards memo, LA County DCBA, news coverage of the July 1 increases):
+- City of Los Angeles: **$18.42 / hour** (effective Jul 1, 2026) ✅
+- Unincorporated LA County: **$18.47 / hour** (effective Jul 1, 2026) ✅
+- Pasadena: **$18.57 / hour** (effective Jul 1, 2026) ✅
+- Glendale: no local ordinance; follows CA statewide **$16.90** (effective Jan 1, 2026, no Jul 1 change) ✅
 
-**2. CA fuel excise tax rate — service-stations.html (HIGH PRIORITY)**
-The CDTFA adjusts the motor vehicle fuel excise tax July 1 annually. The 2026 rate could not be confirmed from a fetched source during this run. The service-stations draft tells readers to "confirm the new rate from your CDTFA account or the CDTFA Special Notices page." Jason: insert the confirmed rate into the email if you have it, or keep the "confirm before sending" phrasing.
+**2. CA fuel excise tax rate — service-stations.html (HIGH PRIORITY) — ✅ CONFIRMED & DRAFT UPDATED**
+Confirmed 2026-06-24 via CDTFA Special Notice L-1025 and corroborating news coverage: the SB 1 annual adjustment takes the **gasoline excise rate from 61.2¢ to 63.4¢/gallon** effective Jul 1, 2026 (diesel to 48.2¢/gallon). The service-stations draft has been **updated** to state the confirmed rate and now links the `/blog/california-fuel-excise-tax-july-2026.html` article. No longer requires manual confirmation before sending.
 
-**3. CDTFA district rate changes for LA-area wholesalers**
-The wholesalers draft notes "no new district sales-tax rate changes announced for LA County for July" and asks Jason to verify against the CDTFA Special Notices page before sending. The CDTFA Special Notices page (cdtfa.ca.gov) could not be fetched during this run.
+**3. CDTFA district rate changes for LA-area wholesalers — ✅ CONFIRMED (no change)**
+Verified 2026-06-24: the most recent CDTFA district rate changes are effective **April 1, 2026** (Special Notice L-1022). No new July 1, 2026 district rate change is announced for LA County. The wholesalers draft's statement ("no new district sales-tax rate changes announced for LA County for July") holds. The draft retains its cautious "verify against CDTFA Special Notices" phrasing.
 
-**4. Blog links**
-All internal links point to jparkassociates.com/blog/<slug>.html. Verify these resolve before sending:
-- /blog/ca-payroll-2026-minimum-wage-sdi.html (general, optometrists)
-- /blog/tip-reporting-restaurants-2026.html (restaurants)
-- /blog/mid-year-tax-planning-checklist.html (general, law-firms)
-- /blog/la-crescenta-glendale-business-tax-map.html (general)
+**4. Blog links — ✅ CONFIRMED (all resolve to real files in repo)**
+All internal links verified present in `blog/`:
+- /blog/ca-payroll-2026-minimum-wage-sdi.html (general, optometrists) ✅
+- /blog/tip-reporting-restaurants-2026.html (restaurants) ✅
+- /blog/mid-year-tax-planning-checklist.html (general, law-firms) ✅
+- /blog/la-crescenta-glendale-business-tax-map.html (general) ✅
+- /blog/california-fuel-excise-tax-july-2026.html (service-stations, newly linked) ✅
 
-**5. `{{UNSUBSCRIBE_URL}}`** — left as-is in all 7 drafts. Jason's send tool fills it.
+**5. `{{UNSUBSCRIBE_URL}}`** — left as-is in all 7 drafts. Justin's send tool fills it. No other `{{ }}` placeholders remain (confirmed).
 
 ---
 
