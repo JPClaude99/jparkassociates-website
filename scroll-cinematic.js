@@ -56,6 +56,13 @@ const frameLoader = (() => {
 
 function initCinematic(cfg) {
   const section = document.querySelector(cfg.section);
+  /* Phones (≤760px, matching the CSS breakpoint where the mobile layout
+     engages) load the portrait reframe when the section provides one;
+     anything wider uses the landscape frames. Decided once at init — the
+     mobile sequence must share cfg.frameCount (both are 193 here). */
+  const framePath = (cfg.framePathMobile && window.matchMedia("(max-width: 760px)").matches)
+    ? cfg.framePathMobile
+    : cfg.framePath;
   const canvas = section.querySelector("canvas");
   const ctx = canvas.getContext("2d", { alpha: false });
   const lines = [...section.querySelectorAll(".reveal-line")];
@@ -271,7 +278,7 @@ function initCinematic(cfg) {
      queue (the desktop "lag before it plays"). Frame 0 is still front-queued
      so the first frame paints as fast as possible. */
   for (let i = 0; i < cfg.frameCount; i++) {
-    frameLoader.enqueue(cfg.framePath(i + 1), (result) => {
+    frameLoader.enqueue(framePath(i + 1), (result) => {
       if (!result) return;
       frames[i] = result;
       if (!USE_BITMAPS && !frameW && result.naturalWidth) {

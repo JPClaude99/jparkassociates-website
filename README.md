@@ -35,8 +35,10 @@ A static server is required — the frame sequences won't load from `file://`.
 | `emails/segments.json` | Client segments (industry/location) — one Monthly Close email drafted per active segment |
 | `emails/_template.html` | Branded email template (table-based, inline styles) with `{{PLACEHOLDERS}}` |
 | `emails/drafts/YYYY-MM/` | Generated email drafts + `_SUMMARY.md` per month — review, then send manually |
-| `frames/hero/` | 193 WebP frames @ 2560×1440 — gold ring orbit (used on desktop and mobile) |
-| `frames/order/` | 193 WebP frames @ 2560×1440 — paperwork settling into a neat stack (chaos → order) |
+| `frames/hero/` | 193 WebP frames @ 2560×1440 — gold ring orbit (desktop/tablet, ≥761px) |
+| `frames/order/` | 193 WebP frames @ 2560×1440 — paperwork settling into a neat stack (desktop/tablet) |
+| `frames/hero-mobile/` | 193 WebP frames @ 1080×1920 — portrait gold ring (phones ≤760px) |
+| `frames/order-mobile/` | 193 WebP frames @ 1080×1920 — portrait paperwork settle (phones ≤760px) |
 | `assets/brand/`, `assets/favicon/` | Copied from `Branding/JPark-Logo/` |
 
 ## Page structure (the conversion spine, per Website Strategy & Blueprint)
@@ -136,6 +138,32 @@ ffmpeg -i order_ai2k.mp4 -loop 1 -i mask.png -filter_complex \
 If the frame count changes, update `frameCount` in the `SCRUB_SECTIONS` config at
 the bottom of `index.html`. (On Windows, slice to a temp dir then `robocopy` into
 `frames/` — the working-tree file watcher can lock files mid-write and abort ffmpeg.)
+
+### Mobile portrait frames
+
+Phones (≤760px) use separate **portrait 1080×1920** sequences in `frames/hero-mobile/`
+and `frames/order-mobile/`, sliced from the Higgsfield portrait reframes (gen IDs
+`64d06a94` = hero, `00bb2e24` = order; 24fps, 193 frames — keep this count equal to the
+landscape sequences so `frameCount` and the text choreography match). Same q85 WebP. Hero:
+
+```
+ffmpeg -i hero_portrait.mp4 -c:v libwebp -compression_level 6 -q:v 85 frames/hero-mobile/frame_%04d.webp
+```
+
+The portrait **order** reframe also re-exposes the hallucinated "AURUM FINANCIAL" desk-mat
+logo — at a DIFFERENT position than the landscape clip (the camera dollies it from
+center to lower-right across frames 0–160, fading to shadow by the end). It needs its
+own portrait mask (box covers the logo's full travel, feathered):
+
+```
+ffmpeg -f lavfi -i color=black:s=1080x1920 -vf "drawbox=x=670:y=1015:w=350:h=215:color=white:t=fill,boxblur=30" -frames:v 1 mask_portrait.png
+ffmpeg -i order_portrait.mp4 -loop 1 -i mask_portrait.png -filter_complex \
+  "[0:v]boxblur=26:2,eq=brightness=-0.12:saturation=0.45[fx];[1:v]format=gray[m];[fx][m]alphamerge[fxa];[0:v][fxa]overlay=0:0[out]" \
+  -map "[out]" -frames:v 193 -c:v libwebp -compression_level 6 -q:v 85 frames/order-mobile/frame_%04d.webp
+```
+
+⚠️ ANY re-slice of `frames/order-mobile/` MUST re-apply this mask or the fake logo
+returns — same rule as the desktop order clip, different coordinates.
 
 ## Notes on the stack choice
 
