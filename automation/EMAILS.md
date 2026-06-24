@@ -98,6 +98,14 @@ for the specific year.
 7. **PR**: branch `emails/YYYY-MM`, commit `Monthly email drafts: <Month Year>`,
    PR title `[Monthly email] <Month Year> drafts`. PR body: the summary file's
    contents.
+8. **Deliver to Justin** (do this as soon as the drafts are written — every
+   run, not on request): render the whole month into one review PDF with
+   `python3 automation/render-drafts-pdf.py YYYY-MM`, then hand that PDF to
+   Justin immediately (deliver it in the session/chat, and attach/link it on
+   the PR). This is how the drafts reach him for review. There is no ESP, so
+   nothing is emailed automatically — Justin reviews the PDF and sends from his
+   own mail tool. Lead the handoff with the `_SUMMARY.md` highlights: target
+   month, suggested send date, and anything still to verify.
 
 ## Hard rules
 
@@ -109,3 +117,18 @@ for the specific year.
   into the template.
 - The unsubscribe placeholder (`{{UNSUBSCRIBE_URL}}`) stays a placeholder —
   Justin's send tool fills it. Never remove the unsubscribe line.
+
+## Tooling
+
+- PDF rendering needs WeasyPrint + pypdf: `pip3 install weasyprint pypdf`.
+  `automation/render-drafts-pdf.py <YYYY-MM>` writes a combined review PDF.
+
+## Backlog (deferred — don't build without sign-off)
+
+- **Auto-email the PDF to Justin.** Requires a sending integration (ESP such
+  as Resend with domain DNS, or Google Workspace SMTP) plus a stored secret
+  and a runner. Decided to keep sending manual for now.
+- **Approve-from-inbox.** A clickable "Approve" button in the delivery email.
+  Options weighed: GitHub PR-merge link (reuses existing setup, no backend),
+  a hosted one-click approval endpoint (needs a serverless function + secret),
+  or reply-to-approve. Deferred — revisit when auto-email is set up.
