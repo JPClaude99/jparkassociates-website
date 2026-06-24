@@ -930,8 +930,11 @@ a { color: inherit; }
 }
 @media (max-width: 580px) {
   .nav { padding-left: 16px; padding-right: 16px; }
-  .nav-cta .label-full { display: none; }
-  .nav-cta .label-short { display: inline; }
+  /* Phone header collapses to logo + hamburger. The inline CTA + toggle together
+     overflow past the right edge here, pushing the hamburger off-screen — so drop
+     the nav CTA on phones. It's still surfaced in the hero and in the slide-out
+     menu (.sidebar-cta), and the menu now owns navigation at this width. */
+  .nav-cta { display: none; }
 }
 @media (max-width: 360px) {
   .nav .logo { height: 36px; }
