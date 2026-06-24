@@ -30,7 +30,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css?v=12" />
-  <link rel="preload" as="image" href="frames/hero/frame_0001.webp?v=2" fetchpriority="high" />
+  <link rel="preload" as="image" href="frames/hero/frame_0001.webp?v=2" fetchpriority="high" media="(min-width: 761px)" />
+  <link rel="preload" as="image" href="frames/hero-mobile/frame_0001.webp?v=1" fetchpriority="high" media="(max-width: 760px)" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -504,10 +505,12 @@
         duration: 6500, /* ms for the one play-through when the panel engages */
         bg: "#111c33",
         filter: "brightness(1.04) contrast(1.09) saturate(1.15)",
-        /* Mobile uses the same landscape hero asset as desktop (cover-fit crops
-           to the centered ring), so phones get the AI-2K clip and the identical
-           play-on-enter behavior — no separate portrait sequence. */
-        framePath: (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp?v=2`
+        /* Desktop/tablet use the landscape 2K frames; phones (≤760px) get the
+           portrait 1080×1920 reframe so the gold ring fills the screen instead
+           of being cropped by cover-fit. Same 193-frame count and duration, so
+           the text choreography is identical on both. */
+        framePath: (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp?v=2`,
+        framePathMobile: (i) => `frames/hero-mobile/frame_${String(i).padStart(4, "0")}.webp?v=1`
       },
       {
         section: "#order",
@@ -515,10 +518,11 @@
         duration: 5400,
         bg: "#111c33",
         filter: "brightness(1.02) contrast(1.06) saturate(1.08)",
-        framePath: (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp?v=2`
+        framePath: (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp?v=2`,
+        framePathMobile: (i) => `frames/order-mobile/frame_${String(i).padStart(4, "0")}.webp?v=1`
       }
     ];
   </script>
-  <script src="scroll-cinematic.js?v=12"></script>
+  <script src="scroll-cinematic.js?v=13"></script>
 </body>
 </html>
