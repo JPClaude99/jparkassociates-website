@@ -115,8 +115,11 @@ for the specific year.
   _SUMMARY.md rather than guessing.
 - No legal/tax advice framing — informational tone + the disclaimer baked
   into the template.
-- The unsubscribe placeholder (`{{UNSUBSCRIBE_URL}}`) stays a placeholder —
-  Justin's send tool fills it. Never remove the unsubscribe line.
+- The unsubscribe line stays in every email. It points to a working
+  `mailto:justinpark@jparkassociates.com?subject=Unsubscribe...` opt-out
+  (no ESP required; opt-outs land in Justin's inbox). If an ESP with
+  one-click token unsubscribe is adopted later, swap that mailto for its
+  URL — but never remove the unsubscribe line.
 
 ## Tooling
 
