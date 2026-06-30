@@ -1,0 +1,16 @@
+{
+  "_comment": "Non-secret config for automation/send.mjs (see automation/SEND.md). The Brevo API key is NOT here — it comes from the BREVO_API_KEY env var / GitHub Actions secret and must never be committed. After you create the account: (1) authenticate jparkassociates.com and set sender/replyTo to a real address on that domain; (2) create one Brevo list per active segment and paste each numeric list id below.",
+  "sender": { "name": "J Park & Associates", "email": "REPLACE_ME@jparkassociates.com" },
+  "replyTo": "REPLACE_ME@jparkassociates.com",
+  "timezone": "America/Los_Angeles",
+  "sendTime": "09:00",
+  "lists": {
+    "general": null,
+    "restaurants": null,
+    "optometrists": null,
+    "wholesalers": null,
+    "service-stations": null,
+    "law-firms": null,
+    "grocery": null
+  }
+}

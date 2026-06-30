@@ -1,0 +1,58 @@
+name: Monthly email — send (dry run)
+
+# Phase 1: dry run only. This workflow validates the rendered drafts and
+# prints the Brevo campaign plan. It creates nothing and sends nothing —
+# automation/send.mjs is dry-run by default and no API key is used here.
+#
+# Going live (Phase 2) is a deliberate change: add the BREVO_API_KEY secret,
+# fill brevo.config.json, then enable the commented "schedule (live)" job
+# below. Until then this is completely inert.
+
+on:
+  pull_request:
+    paths:
+      - 'emails/drafts/**'
+      - 'emails/segments.json'
+      - 'automation/send.mjs'
+      - 'automation/brevo.config.json'
+      - '.github/workflows/monthly-email-send.yml'
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 'Target month YYYY-MM (blank = next month)'
+        required: false
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Dry run (validate drafts + print Brevo plan)
+        env:
+          SEND_MONTH: ${{ github.event.inputs.month }}
+        run: node automation/send.mjs ${SEND_MONTH:+--month=$SEND_MONTH}
+
+  # ----------------------------------------------------------------
+  # Phase 2 — LIVE scheduled send (disabled). Do NOT enable until:
+  #   1. brevo.config.json has a real sender + a list id per segment
+  #   2. BREVO_API_KEY is added under repo Settings → Secrets → Actions
+  #   3. you have watched a green dry run for the month
+  #
+  # schedule-live:
+  #   if: github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   needs: dry-run
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '20'
+  #     - name: Schedule Brevo campaigns
+  #       env:
+  #         BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+  #         SEND_MONTH: ${{ github.event.inputs.month }}
+  #       run: node automation/send.mjs ${SEND_MONTH:+--month=$SEND_MONTH} --send
+  # ----------------------------------------------------------------
