@@ -7,6 +7,12 @@
 
      Email-client constraints: keep everything table-based with
      inline styles; absolute URLs only (the site is the image host).
+     Belt-and-suspenders backgrounds: every colored cell carries BOTH
+     a bgcolor="..." attribute AND a background-color in its style.
+     Some sanitizers (notably Gmail's compose/draft view) strip CSS
+     background-color but keep the bgcolor attribute — keep both in
+     sync on any element you recolor, and build buttons as a bgcolor
+     <td> wrapping the <a> (a bare <a> background-color gets dropped).
 
      Placeholders:
        {{SUBJECT}}          subject line (also the <title>)
@@ -37,24 +43,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{SUBJECT}}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#F5F0E8;">
+<body bgcolor="#F5F0E8" style="margin:0;padding:0;background-color:#F5F0E8;">
   <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">{{PREHEADER}}</div>
 
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5F0E8;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F0E8" style="background-color:#F5F0E8;">
     <tr>
       <td align="center" style="padding:28px 12px;">
         <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:100%;">
 
           <!-- Header -->
           <tr>
-            <td style="background-color:#111c33;border-radius:14px 14px 0 0;padding:30px 36px 26px;">
+            <td bgcolor="#111c33" style="background-color:#111c33;border-radius:14px 14px 0 0;padding:30px 36px 26px;">
               <img src="https://jparkassociates.com/assets/brand/logo-email-white-760.png" alt="J Park &amp; Associates — Certified Public Accountants" width="340" style="display:block;width:340px;max-width:100%;height:auto;border:0;" />
             </td>
           </tr>
 
           <!-- Title block -->
           <tr>
-            <td style="background-color:#111c33;padding:0 36px 34px;">
+            <td bgcolor="#111c33" style="background-color:#111c33;padding:0 36px 34px;">
               <p style="margin:0 0 8px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:3px;text-transform:uppercase;color:#e0c87e;">The Monthly Close &middot; {{SEGMENT_LABEL}}</p>
               <h1 style="margin:0;font:700 30px/1.2 Georgia,'Times New Roman',serif;color:#F5F0E8;">{{MONTH_LABEL}}, before it starts.</h1>
             </td>
@@ -62,14 +68,14 @@
 
           <!-- Intro -->
           <tr>
-            <td style="background-color:#ffffff;padding:30px 36px 6px;">
+            <td bgcolor="#ffffff" style="background-color:#ffffff;padding:30px 36px 6px;">
               {{INTRO_HTML}}
             </td>
           </tr>
 
           <!-- Deadlines -->
           <tr>
-            <td style="background-color:#ffffff;padding:18px 36px 8px;">
+            <td bgcolor="#ffffff" style="background-color:#ffffff;padding:18px 36px 8px;">
               <h2 style="margin:0 0 4px;font:700 20px/1.3 Georgia,'Times New Roman',serif;color:#1B2A4A;">Deadlines this month</h2>
               <p style="margin:0 0 14px;font:400 13px/1.5 Arial,Helvetica,sans-serif;color:#5C6577;">If we handle your books or payroll, the ones in our lane are already on our calendar.</p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e8e2d6;border-radius:10px;border-collapse:separate;overflow:hidden;">
@@ -80,7 +86,7 @@
 
           <!-- What changed -->
           <tr>
-            <td style="background-color:#ffffff;padding:26px 36px 6px;">
+            <td bgcolor="#ffffff" style="background-color:#ffffff;padding:26px 36px 6px;">
               <h2 style="margin:0 0 12px;font:700 20px/1.3 Georgia,'Times New Roman',serif;color:#1B2A4A;">What changed</h2>
               {{CHANGES_HTML}}
             </td>
@@ -88,10 +94,10 @@
 
           <!-- Industry spotlight -->
           <tr>
-            <td style="background-color:#ffffff;padding:22px 36px 6px;">
+            <td bgcolor="#ffffff" style="background-color:#ffffff;padding:22px 36px 6px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td style="background-color:#F5F0E8;border-left:4px solid #C9A84C;border-radius:10px;padding:20px 24px;">
+                  <td bgcolor="#F5F0E8" style="background-color:#F5F0E8;border-left:4px solid #C9A84C;border-radius:10px;padding:20px 24px;">
                     <p style="margin:0 0 8px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2.5px;text-transform:uppercase;color:#C9A84C;">For your industry</p>
                     <h3 style="margin:0 0 10px;font:700 17px/1.3 Georgia,'Times New Roman',serif;color:#1B2A4A;">{{SPOTLIGHT_TITLE}}</h3>
                     {{SPOTLIGHT_HTML}}
@@ -103,7 +109,7 @@
 
           <!-- Local notes -->
           <tr>
-            <td style="background-color:#ffffff;padding:24px 36px 10px;">
+            <td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 36px 10px;">
               <h2 style="margin:0 0 10px;font:700 20px/1.3 Georgia,'Times New Roman',serif;color:#1B2A4A;">Local notes</h2>
               {{LOCAL_HTML}}
             </td>
@@ -111,12 +117,18 @@
 
           <!-- CTA -->
           <tr>
-            <td style="background-color:#ffffff;border-radius:0 0 14px 14px;padding:28px 36px 36px;">
+            <td bgcolor="#ffffff" style="background-color:#ffffff;border-radius:0 0 14px 14px;padding:28px 36px 36px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td style="background-color:#1B2A4A;border-radius:12px;padding:26px 28px;" align="center">
+                  <td bgcolor="#1B2A4A" style="background-color:#1B2A4A;border-radius:12px;padding:26px 28px;" align="center">
                     <p style="margin:0 0 14px;font:400 15px/1.5 Arial,Helvetica,sans-serif;color:#F5F0E8;">Anything on this list you&rsquo;d rather not think about again?</p>
-                    <a href="https://jparkassociates.com/index.html#contact" style="display:inline-block;background-color:#C9A84C;color:#1B2A4A;font:600 14px/1 Arial,Helvetica,sans-serif;text-decoration:none;border-radius:999px;padding:13px 28px;">Book a 15-minute call</a>
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
+                      <tr>
+                        <td bgcolor="#C9A84C" align="center" style="background-color:#C9A84C;border-radius:999px;padding:13px 28px;">
+                          <a href="https://jparkassociates.com/index.html#contact" style="display:inline-block;color:#1B2A4A;font:600 14px/1 Arial,Helvetica,sans-serif;text-decoration:none;">Book a 15-minute call</a>
+                        </td>
+                      </tr>
+                    </table>
                     <p style="margin:14px 0 0;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:#9aa3b5;">or just reply to this email &mdash; it goes straight to Justin.</p>
                   </td>
                 </tr>
