@@ -266,7 +266,7 @@ function initCinematic(cfg) {
     }
   }
 
-  function play() { playing = true; playStart = 0; waitStart = 0; ensureDecoded(0); }
+  function play() { loadFrames(); playing = true; playStart = 0; waitStart = 0; ensureDecoded(0); }
   function reset() { playing = false; playStart = 0; waitStart = 0; current = -1; renderAt(0); }
   function showFinal() { playing = false; renderAt(1); } /* reduced-motion rest state */
 
@@ -276,22 +276,51 @@ function initCinematic(cfg) {
      needs next is simply the next one — fetching in playback order means the
      opening seconds aren't waiting on frames buried at the back of a strided
      queue (the desktop "lag before it plays"). Frame 0 is still front-queued
-     so the first frame paints as fast as possible. */
-  for (let i = 0; i < cfg.frameCount; i++) {
-    frameLoader.enqueue(framePath(i + 1), (result) => {
+     so the first frame paints as fast as possible.
+
+     Loading is DEFERRED, not automatic: each sequence is ~12–25 MB, and
+     enqueueing both sections at init shipped ~48 MB per desktop visit before
+     anyone scrolled. boot() starts a section's load when it comes within a
+     viewport of the screen (and play() forces it as a fallback). */
+  let loadStarted = false;
+  function loadFrames() {
+    if (loadStarted) return;
+    loadStarted = true;
+    for (let i = 0; i < cfg.frameCount; i++) {
+      frameLoader.enqueue(framePath(i + 1), (result) => {
+        if (!result) return;
+        frames[i] = result;
+        if (!USE_BITMAPS && !frameW && result.naturalWidth) {
+          frameW = result.naturalWidth;
+          frameH = result.naturalHeight;
+          resize(); /* legacy path: apply the source-capped dpr, paint frame 0 */
+        }
+      }, i === 0);
+    }
+  }
+
+  /* Reduced-motion visitors only ever see the resting final frame, so they
+     get that single frame instead of the whole sequence. */
+  let finalRequested = false;
+  function loadFinalFrame() {
+    if (loadStarted || finalRequested) return;
+    finalRequested = true;
+    const last = cfg.frameCount - 1;
+    frameLoader.enqueue(framePath(cfg.frameCount), (result) => {
       if (!result) return;
-      frames[i] = result;
-      if (!USE_BITMAPS && !frameW && result.naturalWidth) {
-        frameW = result.naturalWidth;
-        frameH = result.naturalHeight;
-        resize(); /* legacy path: apply the source-capped dpr, paint frame 0 */
+      frames[last] = result;
+      if (USE_BITMAPS) {
+        decodeIdx(last); /* redraws via the i === current hook once decoded */
+      } else if (result.naturalWidth) {
+        if (!frameW) { frameW = result.naturalWidth; frameH = result.naturalHeight; }
+        resize();
       }
-    }, i === 0);
+    }, true);
   }
 
   window.addEventListener("resize", resize);
   resize();
-  return { tick, play, reset, showFinal, resize, el: section, cfg };
+  return { tick, play, reset, showFinal, resize, load: loadFrames, loadFinal: loadFinalFrame, el: section, cfg };
 }
 
 /* ---------- Stat counters ---------- */
@@ -380,6 +409,8 @@ function initStressTest() {
     const band = BANDS.find((b) => score <= b.max);
     heading.textContent = band.title;
     body.textContent = band.body;
+    /* First completion only — later answer changes just update the copy */
+    if (result.hidden && window.gtag) window.gtag("event", "stress_test_complete", { score: score });
     result.hidden = false;
     requestAnimationFrame(() => {
       meter.style.width = Math.max(8, (score / questions.length) * 100) + "%";
@@ -452,6 +483,7 @@ function initStressTest() {
         msg.textContent = "Got it — look for a message from justinpark@jparkassociates.com, usually within one business day.";
         msg.className = "form-msg ok";
         form.reset();
+        if (window.gtag) window.gtag("event", "generate_lead", { form: "stress_test_email" });
       } else {
         throw new Error(data.message);
       }
@@ -510,6 +542,7 @@ function initContactForm() {
         msg.textContent = "Message sent — you’ll hear from justinpark@jparkassociates.com within one business day.";
         msg.className = "form-msg ok";
         form.reset();
+        if (window.gtag) window.gtag("event", "generate_lead", { form: "contact" });
       } else {
         throw new Error(data.message);
       }
@@ -656,7 +689,23 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  if (reducedMotion) cinematics.forEach((c) => c.showFinal());
+  /* Kick off frame loading per section as it approaches the viewport.
+     The hero is on screen at load, so it starts immediately; the second
+     cinematic waits until the visitor is within a viewport of it instead
+     of competing with the hero for bandwidth on page load. Reduced motion
+     shows only each clip's resting final frame, so fetch just that. */
+  if (reducedMotion) {
+    cinematics.forEach((c) => { c.loadFinal(); c.showFinal(); });
+  } else if ("IntersectionObserver" in window) {
+    cinematics.forEach((c) => {
+      const loadIO = new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) { c.load(); loadIO.disconnect(); }
+      }, { rootMargin: "100% 0px" });
+      loadIO.observe(c.el);
+    });
+  } else {
+    cinematics.forEach((c) => c.load());
+  }
 
   /* Touch / no-snap path: native scrolling is left completely alone; each
      cinematic clip simply plays once whenever its panel scrolls into view. */
