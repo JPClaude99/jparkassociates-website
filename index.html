@@ -29,7 +29,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=14" />
+  <link rel="stylesheet" href="styles.css?v=15" />
   <script>document.documentElement.classList.add("js");</script>
   <link rel="preload" as="image" href="frames/hero/frame_0001.webp?v=2" fetchpriority="high" media="(min-width: 761px)" />
   <link rel="preload" as="image" href="frames/hero-mobile/frame_0001.webp?v=1" fetchpriority="high" media="(max-width: 760px)" />
@@ -116,7 +116,7 @@
   <!-- ============ Cinematic hero — gold ring orbit ============ -->
   <section class="cinematic" id="hero" aria-label="Introduction">
     <div class="sticky">
-      <canvas aria-hidden="true"></canvas>
+      <video aria-hidden="true" muted playsinline preload="none" tabindex="-1" disablepictureinpicture disableremoteplayback></video>
       <div class="vignette"></div>
       <div class="overlay">
         <div class="reveal-line" data-in="-0.28" data-out="0.30">
@@ -202,7 +202,7 @@
   <!-- ============ Cinematic interlude — papers settle into order ============ -->
   <section class="cinematic" id="order" aria-label="From chaos to order">
     <div class="sticky">
-      <canvas aria-hidden="true"></canvas>
+      <video aria-hidden="true" muted playsinline preload="none" tabindex="-1" disablepictureinpicture disableremoteplayback></video>
       <div class="vignette"></div>
       <div class="overlay">
         <div class="reveal-line" data-in="-0.28" data-out="0.30">
@@ -512,29 +512,41 @@
     window.SCRUB_SECTIONS = [
       {
         section: "#hero",
-        frameCount: 193,
-        duration: 6500, /* ms for the one play-through when the panel engages */
-        bg: "#111c33",
         filter: "brightness(1.04) contrast(1.09) saturate(1.15)",
-        /* Desktop/tablet use the landscape 2K frames; phones (≤760px) get the
+        /* Desktop/tablet use the landscape 2K encode; phones (≤760px) get the
            portrait 1080×1920 reframe so the gold ring fills the screen instead
-           of being cropped by cover-fit. Same 193-frame count and duration, so
-           the text choreography is identical on both. */
-        framePath: (i) => `frames/hero/frame_${String(i).padStart(4, "0")}.webp?v=2`,
-        framePathMobile: (i) => `frames/hero-mobile/frame_${String(i).padStart(4, "0")}.webp?v=1`
+           of being cropped by cover-fit. Both run 6.5s (encoded at the fps
+           that preserves it), so the text choreography is identical.
+           Posters are frame 1 of the source sequences — the hero's is
+           preloaded in <head> for instant first paint. */
+        video: {
+          webm: "assets/video/hero.webm?v=1",
+          mp4: "assets/video/hero.mp4?v=1",
+          poster: "frames/hero/frame_0001.webp?v=2"
+        },
+        videoMobile: {
+          webm: "assets/video/hero-mobile.webm?v=1",
+          mp4: "assets/video/hero-mobile.mp4?v=1",
+          poster: "frames/hero-mobile/frame_0001.webp?v=1"
+        }
       },
       {
         section: "#order",
-        frameCount: 193,
-        duration: 5400,
-        bg: "#111c33",
         filter: "brightness(1.02) contrast(1.06) saturate(1.08)",
-        framePath: (i) => `frames/order/frame_${String(i).padStart(4, "0")}.webp?v=2`,
-        framePathMobile: (i) => `frames/order-mobile/frame_${String(i).padStart(4, "0")}.webp?v=1`
+        video: {
+          webm: "assets/video/order.webm?v=1",
+          mp4: "assets/video/order.mp4?v=1",
+          poster: "frames/order/frame_0001.webp?v=2"
+        },
+        videoMobile: {
+          webm: "assets/video/order-mobile.webm?v=1",
+          mp4: "assets/video/order-mobile.mp4?v=1",
+          poster: "frames/order-mobile/frame_0001.webp?v=1"
+        }
       }
     ];
   </script>
-  <script src="scroll-cinematic.js?v=14"></script>
+  <script src="scroll-cinematic.js?v=15"></script>
   <script src="analytics.js?v=1"></script>
 </body>
 </html>
