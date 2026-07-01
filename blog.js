@@ -35,7 +35,7 @@
   }
 
   function artHTML(post) {
-    return '<div class="card-art" aria-hidden="true">' +
+    return '<div class="card-art" data-cat="' + esc(post.category) + '" aria-hidden="true">' +
       '<span class="cat-chip">' + esc(CATEGORIES[post.category] || post.category) + "</span>" +
       '<span class="src">' + esc(post.srcShort || post.source) + "</span>" +
       "</div>";
@@ -172,6 +172,7 @@
           msg.textContent = "You're on the list. One email a month — that's the whole deal.";
           msg.className = "form-msg ok";
           form.reset();
+          if (window.gtag) window.gtag("event", "generate_lead", { form: "newsletter" });
         } else {
           throw new Error(data.message);
         }

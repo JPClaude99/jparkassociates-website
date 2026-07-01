@@ -102,17 +102,34 @@ content — so this is cosmetic, but move them out of the repo if that changes.
 
 ## Before launch — replace these
 
-- **Office hours** (not yet on the site).
-- **Case studies** in `#proof` — currently anonymized/representative; replace with
-  permission-cleared client results (the footnote says so on-page).
-- **Stress-test email form** — UI + validation only; the submit handler in
-  `scroll-cinematic.js` (`initStressTest`) is a stub. Connect Netlify Forms,
-  Formspree, or an ESP.
+- **Case studies** in `#proof` — written as typical engagement shapes (no client
+  claims); swap in permission-cleared client results when available.
+- ~~Stress-test email form~~ — wired to Web3Forms (key in `scroll-cinematic.js`).
 - ~~Blog newsletter form~~ — wired to Web3Forms (key in `blog.js`); new
   subscribers arrive by email. Move the list to a real ESP when volume grows.
-- **Sample blog articles** — review/replace the six seeded posts (see the blog
+- **Sample blog articles** — review/replace the seeded posts (see the blog
   section above).
-- `og:image` meta tag (a frame from `frames/hero/` works well).
+- **Analytics** — paste the GA4 Measurement ID into `analytics.js` (see below).
+
+## Analytics & Search Console
+
+The site ships with `analytics.js` on every page. It is **inert until a GA4
+Measurement ID is pasted in** — no consent banner is needed while it's off.
+
+1. **GA4**: create a property at [analytics.google.com](https://analytics.google.com)
+   (Admin → Create property → add a Web data stream for `jparkassociates.com`),
+   copy the Measurement ID (`G-XXXXXXXXXX`), and paste it into the `GA_ID`
+   constant at the top of `analytics.js`. Deploy. The site's forms then report
+   conversions automatically: `stress_test_complete` (with the 0–5 score) and
+   `generate_lead` with `form` = `stress_test_email` / `contact` / `newsletter` —
+   mark `generate_lead` as a key event in GA4 admin.
+2. **Search Console**: at [search.google.com/search-console](https://search.google.com/search-console),
+   add `jparkassociates.com` as a **Domain** property and verify via the DNS TXT
+   record (done at the DNS host — nothing in this repo), or add a URL-prefix
+   property and drop Google's `googleXXXX.html` verification file in the repo
+   root. Then submit `https://jparkassociates.com/sitemap.xml` under Sitemaps.
+   If GA4 is already active, URL-prefix verification also works with zero
+   extra steps via the Google Analytics method.
 
 ## Re-slicing frames
 
