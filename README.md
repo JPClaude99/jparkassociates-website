@@ -131,6 +131,27 @@ Measurement ID is pasted in** — no consent banner is needed while it's off.
    If GA4 is already active, URL-prefix verification also works with zero
    extra steps via the Google Analytics method.
 
+## Regenerating the videos
+
+The cinematic panels play `assets/video/*.webm|mp4`, encoded **from the frame
+sequences in `frames/`** (which stay in the repo as the masters — the site no
+longer fetches them at runtime except frame 1, used as each video's poster).
+The fps preserves the original choreography: hero plays 193 frames over 6.5 s
+(29.6923 fps), order over 5.4 s (35.7407 fps). If you re-slice frames, re-encode:
+
+```
+# hero (repeat with frames/hero-mobile -> hero-mobile at the same fps)
+ffmpeg -framerate 29.6923 -start_number 1 -i frames/hero/frame_%04d.webp \
+  -c:v libvpx-vp9 -crf 34 -b:v 0 -pix_fmt yuv420p -row-mt 1 -an assets/video/hero.webm
+ffmpeg -framerate 29.6923 -start_number 1 -i frames/hero/frame_%04d.webp \
+  -c:v libx264 -crf 23 -preset slow -pix_fmt yuv420p -movflags +faststart -an assets/video/hero.mp4
+
+# order + order-mobile: same commands with -framerate 35.7407
+```
+
+Then bump the `?v=` on the video URLs in the `SCRUB_SECTIONS` config at the
+bottom of `index.html`.
+
 ## Re-slicing frames
 
 Frames are AI-upscaled to 2K via Higgsfield's video upscaler (`aigc` preset) from

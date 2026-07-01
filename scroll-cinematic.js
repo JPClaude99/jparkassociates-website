@@ -1,209 +1,57 @@
 /* ============================================================
    J PARK & ASSOCIATES — scroll engine + interactions
-   Canvas frame-sequence scrub, Lenis smooth scroll, reveals,
+   Cinematic video panels, Lenis smooth scroll, reveals,
    pain-point navigator, stress test, nav theme swap.
    ============================================================ */
 
-/* ---------- Frame-scrub sections ---------- */
+/* ---------- Cinematic video sections ---------- */
 
-/* Frames decode off the main thread only when createImageBitmap is fed
-   a Blob — createImageBitmap(<img>) decodes synchronously on the main
-   thread in Chrome (~12 ms per 1920x1080 frame, measured). So we keep
-   compressed Blobs (~55 KB each, ~20 MB for all 362) and decode a
-   sliding window of them into ImageBitmaps as the user scrolls. */
-const USE_BITMAPS = typeof createImageBitmap === "function" && typeof fetch === "function";
-
-/* Shared frame loader: priority queue with limited concurrency.
-   Firing 362 requests at once lets HTTP/2 multiplex them all, so every
-   frame trickles in together and none completes early; a small
-   concurrent window makes frames complete progressively instead. */
-const frameLoader = (() => {
-  const queue = [];
-  let active = 0;
-  const MAX_CONCURRENT = 8;
-  function pump() {
-    while (active < MAX_CONCURRENT && queue.length) {
-      const job = queue.shift();
-      active++;
-      const settle = (result) => {
-        active--;
-        job.cb(result || null);
-        pump();
-      };
-      if (USE_BITMAPS) {
-        fetch(job.src)
-          .then((r) => (r.ok ? r.blob() : null))
-          .then(settle)
-          .catch(() => settle(null));
-      } else {
-        /* Legacy path: plain images, drawn directly (pre-2021 browsers) */
-        const img = new Image();
-        img.decoding = "async";
-        img.onload = () => { img.onload = img.onerror = null; settle(img); };
-        img.onerror = () => { img.onload = img.onerror = null; settle(null); };
-        img.src = job.src;
-      }
-    }
-  }
-  return {
-    enqueue(src, cb, front) {
-      const job = { src, cb };
-      if (front) queue.unshift(job); else queue.push(job);
-      pump();
-    }
-  };
-})();
-
+/* Each cinematic panel is a <video> (WebM + MP4, encoded from the frame
+   masters — see README "Regenerating the videos"). Video replaced the old
+   canvas frame-sequence engine: the same clips cost ~1–3 MB as a stream
+   instead of ~12–25 MB as 193 individual frames, and the browser owns
+   buffering, decode, and memory. The text reveals are still driven by
+   playback progress p (0→1), now read from video.currentTime. */
 function initCinematic(cfg) {
   const section = document.querySelector(cfg.section);
   /* Phones (≤760px, matching the CSS breakpoint where the mobile layout
-     engages) load the portrait reframe when the section provides one;
-     anything wider uses the landscape frames. Decided once at init — the
-     mobile sequence must share cfg.frameCount (both are 193 here). */
-  const framePath = (cfg.framePathMobile && window.matchMedia("(max-width: 760px)").matches)
-    ? cfg.framePathMobile
-    : cfg.framePath;
-  const canvas = section.querySelector("canvas");
-  const ctx = canvas.getContext("2d", { alpha: false });
+     engages) play the portrait reframe when the section provides one;
+     anything wider uses the landscape encode. Decided once at init. */
+  const src = (cfg.videoMobile && window.matchMedia("(max-width: 760px)").matches)
+    ? cfg.videoMobile
+    : cfg.video;
+  const video = section.querySelector("video");
   const lines = [...section.querySelectorAll(".reveal-line")];
   const progressFill = section.querySelector(".gold-progress span");
-  const bgFill = cfg.bg || "#111c33";
-  const frames = []; /* Blob per frame (or <img> on the legacy path) */
-  let frameW = 0, frameH = 0; /* native frame size, known after first decode */
-  let current = -1;
-  let fallbackIdx = -1; /* index of the last-drawn frame; protected from eviction */
 
-  /* The color grade lives on the element as a GPU-composited CSS filter.
-     ctx.filter ran the same math on the CPU for every drawImage (~2x the
-     draw cost here, far worse at dpr 2). Bonus: Safari historically
-     ignored ctx.filter, so the grade now applies there too. */
-  if (cfg.filter) canvas.style.filter = cfg.filter;
+  /* The color grade is a GPU-composited CSS filter, same as the canvas era. */
+  if (cfg.filter) video.style.filter = cfg.filter;
 
-  /* --- Decoded-frame cache: a sliding window of ImageBitmaps. ---
-     362 frames decode to ~3 GB of RGBA, so the browser's image-decode
-     cache thrashes and drawImage(<img>) pays a ~15 ms synchronous
-     main-thread decode on every cache miss — the main jank source.
-     createImageBitmap(blob) decodes on a worker thread, so we keep a
-     window of decoded bitmaps around the current frame and the hot path
-     only ever draws already-decoded pixels. */
-  const RANGE = navigator.deviceMemory && navigator.deviceMemory <= 4 ? 8 : 14;
-  const bitmaps = new Map();
-  const decoding = new Set();
-
-  function decodeIdx(i) {
-    if (i < 0 || i >= cfg.frameCount) return;
-    if (bitmaps.has(i) || decoding.has(i) || !frames[i]) return;
-    decoding.add(i);
-    createImageBitmap(frames[i]).then((bm) => {
-      decoding.delete(i);
-      if (!frameW) {
-        frameW = bm.width;
-        frameH = bm.height;
-        resize(); /* apply the source-capped dpr now that dims are known */
-      }
-      if (Math.abs(i - current) > RANGE + 2) { bm.close(); return; }
-      bitmaps.set(i, bm);
-      if (i === current) draw(current); /* upgrade a nearest-frame fallback draw */
-    }).catch(() => decoding.delete(i));
-  }
-
-  function ensureDecoded(center) {
-    if (!USE_BITMAPS) return;
-    for (const [i, bm] of bitmaps) {
-      /* Keep the fallback frame alive even if it drifts outside the window —
-         it is the last resort when a fast-scroll empties the entire cache. */
-      if (Math.abs(i - center) > RANGE + 2 && i !== fallbackIdx) {
-        bm.close(); bitmaps.delete(i);
-      }
-    }
-    for (let d = 0; d <= RANGE; d++) {
-      decodeIdx(center + d);
-      if (d) decodeIdx(center - d);
-    }
-  }
-
-  function releaseBitmaps() {
-    for (const bm of bitmaps.values()) bm.close();
-    bitmaps.clear();
-    fallbackIdx = -1;
-  }
-
-  /* Best available source for a frame. Returns [bitmap, frameIndex] or null.
-     Search order: exact match → nearest decoded → protected fallback (last
-     successfully drawn frame, kept alive through eviction so a fast-scroll
-     decode catch-up never leaves the canvas blank). */
-  function sourceFor(index) {
-    if (USE_BITMAPS) {
-      if (bitmaps.has(index)) return [bitmaps.get(index), index];
-      for (let d = 1; d <= RANGE; d++) {
-        const i1 = index + d;
-        if (bitmaps.has(i1)) return [bitmaps.get(i1), i1];
-        const i2 = index - d;
-        if (bitmaps.has(i2)) return [bitmaps.get(i2), i2];
-      }
-      if (fallbackIdx >= 0 && bitmaps.has(fallbackIdx)) return [bitmaps.get(fallbackIdx), fallbackIdx];
-      return null;
-    }
-    for (let d = 0; d < cfg.frameCount; d++) {
-      const a = frames[index + d], b = frames[index - d];
-      if (a && a.complete && a.naturalWidth) return [a, index + d];
-      if (b && b.complete && b.naturalWidth) return [b, index - d];
-    }
-    return null;
-  }
-
-  function draw(index) {
-    const hit = sourceFor(index);
-    if (!hit) return;
-    const [src, srcIdx] = hit;
-    const iw = src.naturalWidth || src.width, ih = src.naturalHeight || src.height;
-    if (!iw || !ih) return;
-    const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    if (!cw || !ch) return;
-    const ir = iw / ih, cr = cw / ch;
-    let dw, dh, dx, dy;
-    if (ir > cr) {
-      dh = ch; dw = ch * ir; dx = (cw - dw) / 2; dy = 0;
-    } else {
-      dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2;
-    }
-    ctx.fillStyle = bgFill;
-    ctx.fillRect(0, 0, cw, ch);
-    ctx.drawImage(src, dx, dy, dw, dh);
-    fallbackIdx = srcIdx; /* pin: survives the next ensureDecoded eviction pass */
-  }
-
-  function resize() {
-    /* Cap the backing store at what the 1920x1080 source can actually
-       feed: under cover-fit the source detail on screen is
-       min(frameW/cssW, frameH/cssH) px per CSS px, so any dpr above
-       that only multiplies GPU fill and memory (a dpr-2 laptop was
-       pushing a 3840x2160 backing store for a 1920px source) without
-       adding a single pixel of real detail. */
-    const cssW = canvas.clientWidth || 1, cssH = canvas.clientHeight || 1;
-    let dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (frameW && frameH) dpr = Math.min(dpr, Math.min(frameW / cssW, frameH / cssH));
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    /* Paint the section's navy immediately — an alpha:false canvas is
-       opaque black until first draw, which read as a dead-black flash
-       before frame 1 decoded (and after any resize mid-catchup). */
-    ctx.fillStyle = bgFill;
-    ctx.fillRect(0, 0, cssW, cssH);
-    draw(current < 0 ? 0 : current);
+  /* Nothing downloads until attach(): boot() calls load()/loadFinal() when
+     the section comes within a viewport (or play() forces it). The poster —
+     frame 1 of the sequence, already preloaded for the hero — paints the
+     panel while the stream buffers. */
+  let attached = false;
+  function attach(preload) {
+    if (attached) return;
+    attached = true;
+    if (src.poster) video.poster = src.poster;
+    video.preload = preload || "auto";
+    const webm = document.createElement("source");
+    webm.src = src.webm;
+    webm.type = "video/webm";
+    const mp4 = document.createElement("source");
+    mp4.src = src.mp4;
+    mp4.type = "video/mp4";
+    video.append(webm, mp4);
+    video.load();
   }
 
   /* ---- Playback model ----
-     The clip plays once when the panel engages, on its own clock. Frame
-     index and the three text reveals are both driven by playback progress
-     p (0→1) — NOT by how far the page is scrolled. The snap controller in
-     boot() calls play()/reset()/showFinal() as the panel engages, leaves,
-     and (under reduced motion) rests. */
-  const duration = cfg.duration || 6000; /* ms for one full play-through */
+     The clip plays once when the panel engages, on the video's own clock.
+     The snap controller in boot() calls play()/reset()/showFinal() as the
+     panel engages, leaves, and (under reduced motion) rests. */
   let playing = false;
-  let playStart = 0;
-  let waitStart = 0; /* when we began holding for the first frame to decode */
 
   /* Text reveals: the same triangular-plateau fade the scrub used, now
      timed off p so the three lines hand off in sequence as the clip plays. */
@@ -223,104 +71,112 @@ function initCinematic(cfg) {
     }
   }
 
-  function renderAt(p) {
-    const idx = Math.min(cfg.frameCount - 1, Math.floor(p * (cfg.frameCount - 1)));
-    if (idx !== current) { current = idx; draw(idx); }
-    ensureDecoded(idx); /* keep the decode window warm ahead of playback */
-    applyReveals(p);
-  }
-
   /* Driven from the single global rAF (see boot) so there's no per-section
-     timer. Advances the clip while playing; when idle it only frees the
-     decoded window once the panel is well off-screen. */
-  /* Frame 0 is drawable: a decoded bitmap (fast path) or a loaded image
-     (legacy path). The playback clock is gated on this. */
-  function firstFrameReady() {
-    if (USE_BITMAPS) return bitmaps.has(0);
-    return !!(frames[0] && frames[0].complete && frames[0].naturalWidth);
+     timer. Reads playback progress off the video clock; when the clip ends
+     the browser holds the final frame and we hold the final copy. */
+  function tick() {
+    if (!playing) return;
+    const d = video.duration;
+    if (!d) { applyReveals(0); return; } /* metadata still loading: hold the opening state */
+    applyReveals(Math.min(video.currentTime / d, 1));
+    if (video.ended) { playing = false; applyReveals(1); }
   }
 
-  function tick(t) {
-    if (playing) {
-      /* Don't start the clock until frame 0 has decoded — otherwise the
-         wall-clock duration burns down while the opening frames are still
-         loading and the clip jumps in mid-stream (the "lag before it plays").
-         Hold on frame 0, then play from the very start the instant it's ready.
-         A 2s ceiling keeps a slow/failed first frame from stalling forever. */
-      if (playStart === 0) {
-        if (!firstFrameReady()) {
-          if (waitStart === 0) waitStart = t;
-          if (t - waitStart < 2000) { renderAt(0); return; }
+  function seekStart() {
+    try { if (video.readyState >= 1) video.currentTime = 0; } catch (e) { /* not seekable yet */ }
+  }
+
+  function play() {
+    attach("auto");
+    seekStart();
+    playing = true;
+    applyReveals(0);
+    const p = video.play();
+    /* Muted inline video is autoplay-safe everywhere, but iOS Low Power
+       Mode can still reject — rest on the final frame + final copy so the
+       headline and CTAs are never hidden behind a clip that won't run. */
+    if (p && p.catch) p.catch(() => { if (playing) { playing = false; showFinal(); } });
+  }
+
+  function reset() {
+    playing = false;
+    video.pause();
+    seekStart();
+    applyReveals(0);
+  }
+
+  function showFinal() { /* reduced-motion / no-autoplay rest state */
+    playing = false;
+    attach("metadata");
+    video.pause();
+    applyReveals(1);
+
+    /* Rest on the clip's final frame. On a range-capable server (GitHub
+       Pages) the end is seekable as soon as metadata arrives, so this
+       costs one small range fetch. If the server can't serve byte ranges,
+       Chromium pins seekable at [0,0] forever and every seek clamps back
+       to 0 — the escape hatch is to fetch the clip ourselves and swap in
+       a blob URL, which is always fully seekable. */
+    const seekTarget = () => Math.max(0, video.duration - 0.05);
+    function trySeek() {
+      if (!video.duration) return false;
+      const s = video.seekable, t = seekTarget();
+      for (let i = 0; i < s.length; i++) {
+        if (s.start(i) <= t && s.end(i) >= t) {
+          try { video.currentTime = t; } catch (e) { return false; }
+          return true;
         }
-        playStart = t;
-        waitStart = 0;
       }
-      const p = Math.min((t - playStart) / duration, 1);
-      renderAt(p);
-      if (p >= 1) playing = false; /* hold the final frame + final copy */
-      return;
+      return false;
     }
-    if (bitmaps.size) {
-      const r = section.getBoundingClientRect(), vh = window.innerHeight;
-      if (r.bottom < -vh * 0.5 || r.top > vh * 1.5) releaseBitmaps();
+    if (trySeek()) return;
+
+    let escalated = false;
+    function escalate() {
+      if (escalated || typeof fetch !== "function") return;
+      escalated = true;
+      detach();
+      const url = video.currentSrc || src.webm;
+      fetch(url)
+        .then((r) => (r.ok ? r.blob() : null))
+        .then((b) => {
+          if (!b) return;
+          /* One object URL per section, alive for the page's lifetime. */
+          video.src = URL.createObjectURL(b);
+          video.load();
+          video.addEventListener("loadedmetadata", () => { trySeek(); }, { once: true });
+        })
+        .catch(() => { /* poster + final copy remain — acceptable rest state */ });
     }
-  }
-
-  function play() { loadFrames(); playing = true; playStart = 0; waitStart = 0; ensureDecoded(0); }
-  function reset() { playing = false; playStart = 0; waitStart = 0; current = -1; renderAt(0); }
-  function showFinal() { playing = false; renderAt(1); } /* reduced-motion rest state */
-
-  /* Sequential load order. The old stride pattern (coarse-then-fill) existed
-     for scrubbing, where the user could land on any frame. These panels now
-     play once from frame 0 forward on their own clock, so the frame the clip
-     needs next is simply the next one — fetching in playback order means the
-     opening seconds aren't waiting on frames buried at the back of a strided
-     queue (the desktop "lag before it plays"). Frame 0 is still front-queued
-     so the first frame paints as fast as possible.
-
-     Loading is DEFERRED, not automatic: each sequence is ~12–25 MB, and
-     enqueueing both sections at init shipped ~48 MB per desktop visit before
-     anyone scrolled. boot() starts a section's load when it comes within a
-     viewport of the screen (and play() forces it as a fallback). */
-  let loadStarted = false;
-  function loadFrames() {
-    if (loadStarted) return;
-    loadStarted = true;
-    for (let i = 0; i < cfg.frameCount; i++) {
-      frameLoader.enqueue(framePath(i + 1), (result) => {
-        if (!result) return;
-        frames[i] = result;
-        if (!USE_BITMAPS && !frameW && result.naturalWidth) {
-          frameW = result.naturalWidth;
-          frameH = result.naturalHeight;
-          resize(); /* legacy path: apply the source-capped dpr, paint frame 0 */
-        }
-      }, i === 0);
+    function retry() {
+      if (trySeek()) { detach(); return; }
+      /* Metadata is in but the end is not seekable: the no-range signature. */
+      if (video.duration && video.seekable.length && video.seekable.end(0) < 1) escalate();
     }
-  }
-
-  /* Reduced-motion visitors only ever see the resting final frame, so they
-     get that single frame instead of the whole sequence. */
-  let finalRequested = false;
-  function loadFinalFrame() {
-    if (loadStarted || finalRequested) return;
-    finalRequested = true;
-    const last = cfg.frameCount - 1;
-    frameLoader.enqueue(framePath(cfg.frameCount), (result) => {
-      if (!result) return;
-      frames[last] = result;
-      if (USE_BITMAPS) {
-        decodeIdx(last); /* redraws via the i === current hook once decoded */
-      } else if (result.naturalWidth) {
-        if (!frameW) { frameW = result.naturalWidth; frameH = result.naturalHeight; }
-        resize();
+    function detach() {
+      for (const ev of ["loadedmetadata", "progress", "canplaythrough", "suspend"]) {
+        video.removeEventListener(ev, retry);
       }
-    }, true);
+    }
+    for (const ev of ["loadedmetadata", "progress", "canplaythrough", "suspend"]) {
+      video.addEventListener(ev, retry);
+    }
+    if (video.duration) retry(); /* metadata already in: evaluate now */
   }
 
-  window.addEventListener("resize", resize);
-  resize();
-  return { tick, play, reset, showFinal, resize, load: loadFrames, loadFinal: loadFinalFrame, el: section, cfg };
+  applyReveals(0); /* opening line visible before the stream arrives */
+  return {
+    tick,
+    play,
+    reset,
+    showFinal,
+    load: () => attach("auto"),
+    /* Reduced-motion visitors only ever see the resting final frame — ask
+       for metadata and let showFinal()'s seek range-fetch just that. */
+    loadFinal: () => attach("metadata"),
+    el: section,
+    cfg
+  };
 }
 
 /* ---------- Stat counters ---------- */
