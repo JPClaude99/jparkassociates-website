@@ -35,7 +35,7 @@
   }
 
   function artHTML(post) {
-    return '<div class="card-art" aria-hidden="true">' +
+    return '<div class="card-art" data-cat="' + esc(post.category) + '" aria-hidden="true">' +
       '<span class="cat-chip">' + esc(CATEGORIES[post.category] || post.category) + "</span>" +
       '<span class="src">' + esc(post.srcShort || post.source) + "</span>" +
       "</div>";
