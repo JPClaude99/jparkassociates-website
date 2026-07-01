@@ -103,11 +103,6 @@ a { color: inherit; }
   border-color: rgba(245, 240, 232, 0.5);
 }
 .btn-ghost-light:hover { border-color: var(--gold-300); color: var(--gold-300); }
-.btn-ghost-dark {
-  color: var(--navy-900);
-  border-color: rgba(27, 42, 74, 0.35);
-}
-.btn-ghost-dark:hover { border-color: var(--gold-500); }
 .nav .btn { padding: 10px 22px; font-size: 0.85rem; white-space: nowrap; }
 .nav-cta .label-short { display: none; }
 
@@ -793,16 +788,6 @@ html.js .reveal.in { opacity: 1; transform: none; }
   font-size: 0.8rem;
   color: rgba(245, 240, 232, 0.6);
 }
-.placeholder-chip {
-  display: inline-block;
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  color: rgba(245, 240, 232, 0.45);
-  border: 1px dashed rgba(245, 240, 232, 0.3);
-  border-radius: 6px;
-  padding: 1px 8px;
-}
-
 /* ---------- Contact form ---------- */
 .contact-divider {
   display: flex;
