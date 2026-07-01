@@ -140,6 +140,57 @@
   color: var(--gold-300);
   letter-spacing: 0.02em;
 }
+/* Per-category compositions — same palette and monogram, but the geometry
+   shifts by category so the index doesn't read as one card repeated
+   seventeen times. Default (federal & anything unlisted): centered rings. */
+.card-art[data-cat="california"] {
+  background:
+    radial-gradient(120% 130% at 85% 100%, rgba(46, 74, 122, 0.55) 0%, transparent 55%),
+    linear-gradient(205deg, var(--navy-900) 0%, var(--navy-950) 100%);
+}
+.card-art[data-cat="california"]::before { width: 54%; transform: translate(-38%, 22%); }
+.card-art[data-cat="california"]::after { width: 62%; transform: translate(34%, -24%); border-width: 2px; border-color: rgba(201, 168, 76, 0.35); }
+
+.card-art[data-cat="deadlines"] {
+  background:
+    radial-gradient(120% 130% at 50% -20%, rgba(46, 74, 122, 0.5) 0%, transparent 60%),
+    linear-gradient(180deg, var(--navy-900) 0%, var(--navy-950) 100%);
+}
+.card-art[data-cat="deadlines"]::before { width: 40%; border-radius: 16px; transform: translate(-16%, -12%); }
+.card-art[data-cat="deadlines"]::after { width: 40%; border-radius: 16px; border-width: 1.5px; border-color: rgba(201, 168, 76, 0.3); transform: translate(16%, 12%); }
+
+.card-art[data-cat="compliance"] {
+  background:
+    radial-gradient(120% 130% at 100% 0%, rgba(46, 74, 122, 0.5) 0%, transparent 55%),
+    linear-gradient(120deg, var(--navy-950) 0%, var(--navy-900) 100%);
+}
+.card-art[data-cat="compliance"]::before { width: 34%; aspect-ratio: 0.78; border-radius: 8px; transform: translate(-10%, -4%) rotate(-5deg); }
+.card-art[data-cat="compliance"]::after { width: 34%; aspect-ratio: 0.78; border-radius: 8px; border-width: 1.5px; border-color: rgba(201, 168, 76, 0.3); transform: translate(14%, 6%) rotate(5deg); }
+
+.card-art[data-cat="payroll"] {
+  background:
+    radial-gradient(140% 120% at 0% 100%, rgba(46, 74, 122, 0.5) 0%, transparent 55%),
+    linear-gradient(30deg, var(--navy-900) 0%, var(--navy-950) 100%);
+}
+.card-art[data-cat="payroll"]::before { width: 52%; aspect-ratio: auto; height: 3px; border: 0; border-radius: 3px; background: rgba(201, 168, 76, 0.5); transform: translateY(-1100%); }
+.card-art[data-cat="payroll"]::after { width: 34%; aspect-ratio: auto; height: 3px; border: 0; border-radius: 3px; background: rgba(201, 168, 76, 0.25); transform: translate(-26%, 1100%); }
+
+.card-art[data-cat="industry"] {
+  background:
+    radial-gradient(120% 130% at 18% 100%, rgba(46, 74, 122, 0.55) 0%, transparent 55%),
+    linear-gradient(330deg, var(--navy-900) 0%, var(--navy-950) 100%);
+}
+.card-art[data-cat="industry"]::before { width: 52%; transform: translateX(-26%); }
+.card-art[data-cat="industry"]::after { width: 52%; border-width: 2px; border-color: rgba(201, 168, 76, 0.32); transform: translateX(26%); }
+
+.card-art[data-cat="guides"] {
+  background:
+    radial-gradient(130% 120% at 50% 120%, rgba(46, 74, 122, 0.55) 0%, transparent 60%),
+    linear-gradient(0deg, var(--navy-900) 0%, var(--navy-950) 100%);
+}
+.card-art[data-cat="guides"]::before { border-color: transparent transparent rgba(201, 168, 76, 0.55) rgba(201, 168, 76, 0.55); transform: rotate(-45deg); }
+.card-art[data-cat="guides"]::after { border-color: transparent transparent rgba(201, 168, 76, 0.2) rgba(201, 168, 76, 0.2); transform: rotate(-45deg); }
+
 .card-art .cat-chip {
   position: absolute;
   z-index: 1;
