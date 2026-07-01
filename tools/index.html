@@ -24,7 +24,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600;1,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=10" />
+  <link rel="stylesheet" href="../styles.css?v=14" />
   <link rel="stylesheet" href="../blog.css?v=2" />
   <style>
     .tools-grid { max-width: 880px; margin: 28px auto 0; display: grid; grid-template-columns: 1fr; gap: 18px; }
@@ -55,11 +55,40 @@
       <li><a href="../blog.html">Insights</a></li>
       <li><a href="../index.html#contact">Contact</a></li>
     </ul>
-    <a class="btn btn-gold nav-cta" href="../index.html#stress-test">
-      <span class="label-full">Run the 2-minute stress test</span>
-      <span class="label-short">2-min stress test</span>
-    </a>
+    <div class="nav-right">
+      <a class="btn btn-gold nav-cta" href="../index.html#stress-test">
+        <span class="label-full">Run the 2-minute stress test</span>
+        <span class="label-short">2-min stress test</span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+    </div>
   </nav>
+
+  <!-- ============ Slide-in menu sidebar ============ -->
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <aside class="sidebar" id="sidebar" aria-label="Site menu" aria-hidden="true">
+    <div class="sidebar-top">
+      <span class="sidebar-eyebrow">J Park &amp; Associates</span>
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close menu">&times;</button>
+    </div>
+    <nav class="sidebar-links" aria-label="Site sections">
+      <a href="../index.html">Home</a>
+      <a href="../index.html#how">How it works</a>
+      <a href="../blog.html">The Ledger &mdash; insights</a>
+      <a href="../tools/index.html">Tools &amp; calculators</a>
+      <a href="../index.html#contact">Contact</a>
+    </nav>
+    <a class="btn btn-gold sidebar-cta" href="../index.html#stress-test">Free 2-minute stress test</a>
+    <div class="sidebar-contact">
+      <a href="tel:+18182481580">(818)&nbsp;248-1580</a>
+      <a href="mailto:justinpark@jparkassociates.com">justinpark@jparkassociates.com</a>
+      <span>2529 Foothill Blvd. Ste 101<br />La Crescenta, CA 91214</span>
+    </div>
+  </aside>
 
   <header class="article-hero">
     <div class="container-narrow">
@@ -136,5 +165,6 @@
     </div>
   </footer>
 
+  <script src="../nav.js?v=1"></script>
 </body>
 </html>
