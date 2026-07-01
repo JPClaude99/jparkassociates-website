@@ -257,13 +257,15 @@ a { color: inherit; }
   /* Isolate per-frame style/layout invalidation to the stage */
   contain: layout paint;
 }
-.cinematic canvas {
+.cinematic video {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  background: var(--navy-950); /* matches the poster/letterbox while buffering */
   /* Own compositing layer: the color grade (CSS filter, set from the
-     scrub config in JS) and frame blits stay off the page raster */
+     scrub config in JS) stays off the page raster */
   will-change: transform;
 }
 .cinematic .vignette {
