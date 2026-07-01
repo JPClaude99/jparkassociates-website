@@ -174,8 +174,7 @@ function initCinematic(cfg) {
     /* Reduced-motion visitors only ever see the resting final frame — ask
        for metadata and let showFinal()'s seek range-fetch just that. */
     loadFinal: () => attach("metadata"),
-    el: section,
-    cfg
+    el: section
   };
 }
 

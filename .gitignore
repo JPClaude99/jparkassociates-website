@@ -1,6 +1,8 @@
 .claude/
 
-# Source/master video assets — build inputs only. The site ships the extracted
-# WebP frame sequences under frames/, never the .mp4 masters. (hero_4k.mp4 alone
-# is ~107 MB, over GitHub's 100 MB hard limit, so committing these breaks pushes.)
+# Source/master video assets — build inputs only. (hero_4k.mp4 alone is ~107 MB,
+# over GitHub's 100 MB hard limit, so committing these breaks pushes.)
+# The encoded delivery videos under assets/video/ ARE shipped — both the WebM
+# and the MP4 (Safari/iOS fallback) — so they're excepted from the mask.
 *.mp4
+!assets/video/*.mp4
