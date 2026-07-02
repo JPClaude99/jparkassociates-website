@@ -22,7 +22,7 @@ window.BLOG_POSTS = [
   {
     slug: "california-tobacco-retailer-license-fee-2026",
     title: "California tobacco retailer license fee jumps to $450 on July 1, 2026",
-    excerpt: "If your store sells cigarettes or vapes, the CDTFA retailer license fee rises from $265 to $450 per location on July 1 — not prorated. Plus the distributor products tax drops to 51.08% the same day.",
+    excerpt: "If your store sells cigarettes or vapes, the CDTFA retailer license fee rose from $265 to $450 per location on July 1 — not prorated. Plus the distributor products tax dropped to 51.08% the same day.",
     date: "2026-06-29",
     category: "california",
     source: "CDTFA",
