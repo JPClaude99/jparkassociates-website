@@ -20,6 +20,16 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "california-tobacco-retailer-license-fee-2026",
+    title: "California tobacco retailer license fee jumps to $450 on July 1, 2026",
+    excerpt: "If your store sells cigarettes or vapes, the CDTFA retailer license fee rises from $265 to $450 per location on July 1 — not prorated. Plus the distributor products tax drops to 51.08% the same day.",
+    date: "2026-06-29",
+    category: "california",
+    source: "CDTFA",
+    srcShort: "CDTFA",
+    readMins: 5
+  },
+  {
     slug: "la-county-minimum-wage-july-2026",
     title: "Minimum wage rises July 1, 2026 — what La Crescenta and Glendale employers pay now",
     excerpt: "Local minimum wages reset July 1: unincorporated L.A. County (La Crescenta, Montrose) hits $18.47, the City of L.A. $18.42, Pasadena $18.57 — while Glendale follows the state $16.90. What you owe depends on where the work happens.",
