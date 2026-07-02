@@ -24,12 +24,55 @@ Plus the general population of LLCs, S corps, and sole proprietors.
    already drafted or was rejected. **Do not re-draft a topic from a closed,
    unmerged PR** unless the facts have materially changed.
 
-## Step 2 — Scan the sources
+## Step 2 — Scan the sources (two passes)
 
-`automation/sources.json` lists every feed with its URL and focus notes. For
-each source, fetch the listing page and look at items from roughly the **last
-10 days** (runs are weekly; the overlap is intentional — the dedupe in Step 1
-is what prevents repeats).
+`automation/sources.json` lists every feed with its URL, priority, and focus
+notes. Run **two** passes over them — a look-back and a look-ahead.
+
+**Pass A — recent announcements (look-back).** For each source, fetch the
+listing page and look at items from roughly the **last 10 days**. Runs are
+weekly; the overlap is intentional — the dedupe in Step 1 prevents repeats.
+
+**Pass B — upcoming deadlines (look-ahead).** This is the pass that stops us
+publishing *after* an action date. Announcements routinely land months before
+they take effect: the July&nbsp;1 tobacco license-fee increase was posted in
+**April**, and the first run to notice it was June&nbsp;29 — two days out, too
+late for readers to act and too late to survive review + merge + deploy. So do
+**not** triage by when a notice was *posted*. Triage by when the reader has to
+*act*. Each run, build a list of every action/effective date falling in the
+**next ~45 days**, from three places:
+
+  1. **Forward calendars** — the sources tagged `"role": "calendar"` in
+     sources.json (IRS tax calendar, CDTFA "Explanation of Tax Rate Changes"
+     and sales/use-tax filing dates, FTB business due dates). These are
+     forward-looking by design and list dates before any press release.
+  2. **Effective dates inside notices** — when any notice (however old) names a
+     future "effective July&nbsp;1" / "due by" date, capture *that* date, not
+     the posting date. An April notice about a July change is a July item.
+  3. **The recurring deadline calendar below** — predictable dates that repeat
+     every year whether or not a fresh notice appears.
+
+### Recurring deadline calendar (always on the radar)
+
+Cover each of these *ahead* of its date, not after. They repeat annually:
+
+- **Jan&nbsp;1** — statewide minimum-wage increase, SDI rate/withholding change,
+  new-year payroll (DE&nbsp;44) updates.
+- **Quarterly estimated taxes** — federal & CA due **Apr&nbsp;15, Jun&nbsp;15,
+  Sep&nbsp;15, Jan&nbsp;15**.
+- **Quarter starts (Jan&nbsp;1 / Apr&nbsp;1 / Jul&nbsp;1 / Oct&nbsp;1)** — CDTFA
+  district sales-tax rate changes take effect; check the rate-change page for
+  LA-County cities (Glendale, Pasadena, unincorporated county).
+- **Jul&nbsp;1** — CPI fuel-excise adjustment, tobacco products tax rate,
+  tobacco retailer license fee, local minimum-wage resets (LA County / City of
+  LA / Pasadena), and assorted CDTFA fee resets.
+- **Apr&nbsp;1** — Form&nbsp;571-L Business Property Statement due (LA County
+  Assessor); delinquent after May&nbsp;7.
+- **Apr&nbsp;15** — LLC annual $800 tax / first-year timing; C-corp filing.
+
+If a date on this list falls inside the publish window (Step&nbsp;3) and we
+haven't covered it this cycle, that alone is a candidate — no press release
+required.
 
 ## Step 3 — Triage
 
@@ -40,8 +83,30 @@ An announcement is article-worthy when **all** of these hold:
 - **Actionable or calendar-relevant.** The reader can or must do something:
   a deadline, a rate change, a new filing, a new credit, a scam warning,
   relief (e.g., disaster postponements for LA County).
+- **There's still time to act.** For anything with an action date, the article
+  has to reach readers with runway to actually *do* something. See the publish
+  window below. A piece that lands the day before (or after) its own deadline
+  has failed even if every fact in it is correct.
 - **Won't be stale in a week.** Skip commissioner speeches, enforcement
-  press releases about individual fraud cases, and statistics roundups.
+  press releases about individual fraud cases, and statistics roundups. This is
+  about ephemeral *news* — it does **not** mean "skip old notices." A months-old
+  notice about an upcoming due date is exactly what Pass&nbsp;B is for.
+
+### Publish window (lead-time rule)
+
+We run weekly, and after that Justin still reviews, merges, and waits for Pages
+to deploy. So the constraint is the **action date, not today**:
+
+- **Target: publish 2–4 weeks before the action date.** That gives readers
+  runway and absorbs review/merge/deploy lag.
+- **Draft when the date is ≤ ~30 days out** and we haven't covered it. If a
+  qualifying deadline is still >30 days away, don't force it — list it under
+  **"Upcoming (not yet drafted)"** in the report/PR so a later run picks it up
+  as the window opens.
+- **If a deadline is < 10 days out** and still uncovered, draft it anyway but
+  title the PR `[Ledger] TIME-SENSITIVE: …` and state in the body "merge before
+  &lt;date&gt; or this publishes late." (That is the trap we just hit — flag it
+  loudly instead of letting it slip.)
 
 Strong signals: due-date changes or postponements, CDTFA special notices and
 rate changes, FinCEN BOI rule changes (the blog has a standing promise to
@@ -54,6 +119,9 @@ content.
 impactful and list the rest in the PR body under "Also noticed (not drafted)".
 If nothing qualifies — and most weeks nothing will — open no PR and end the
 run with a note in your final report. No empty PRs, no state files to update.
+Even on a no-op week, the report should list the **upcoming deadlines you're
+tracking** (date + what it is) so the look-ahead has a visible paper trail and
+the next run knows what's approaching the publish window.
 
 ## Step 4 — Draft
 
@@ -126,5 +194,9 @@ calibration. The rules they embody:
   - **Confidence notes**: anything you hedged, any number you could not
     verify, anything Justin should double-check before merging.
   - **Also noticed (not drafted)**: the triage leftovers, if any.
+  - **Upcoming (not yet drafted)**: dated items from Pass&nbsp;B that are still
+    outside the publish window, so the next run knows what's coming. Include
+    the action date for each. If a drafted article is time-sensitive, say the
+    merge-by date here too.
 
 Justin merges → GitHub Pages deploys automatically. That's the whole release.
