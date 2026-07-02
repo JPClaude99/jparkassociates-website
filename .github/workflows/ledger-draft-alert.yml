@@ -1,0 +1,95 @@
+name: Ledger draft alert
+
+# Emails jasonpark@jparkassociates.com whenever a Ledger article has been
+# DRAFTED but not yet PUBLISHED — i.e. an open pull request whose title starts
+# with "[Ledger]" or whose branch is ledger/auto-*. Merging that PR is what
+# deploys the article to jparkassociates.com, so an unmerged Ledger PR is
+# exactly "a draft is ready but not live."
+#
+# Why this is failproof (no dependence on any running Claude session):
+#   • schedule            — checks every day and RE-emails as long as a draft
+#                           sits unmerged, so one missed email is never fatal.
+#   • pull_request         — also fires the instant a draft PR is opened.
+#   • workflow_dispatch    — run the check on demand from the Actions tab.
+#   • If the SMTP secrets below are missing/wrong, the email step FAILS, which
+#     makes GitHub email the repo admin about the failed run — so you are
+#     alerted even when the alerting itself is misconfigured.
+#
+# ── One-time setup (≈3 minutes) ────────────────────────────────────────────
+# Add two repository secrets under:
+#   Settings → Secrets and variables → Actions → New repository secret
+#     LEDGER_ALERT_SMTP_USER   a Gmail / Google Workspace address to send FROM
+#     LEDGER_ALERT_SMTP_PASS   a Google App Password for that address
+# Create the App Password at myaccount.google.com → Security → 2-Step
+# Verification → App passwords. (Workspace accounts: an admin may first need to
+# allow app passwords for the org.) The "to" address is set below.
+# ───────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '0 15 * * *'      # 15:00 UTC ≈ 08:00 America/Los_Angeles, daily
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  ledger-draft-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find open, unmerged Ledger drafts
+        id: find
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const drafts = prs.filter(p =>
+              !p.draft &&
+              (p.title.startsWith('[Ledger]') ||
+               (p.head && p.head.ref && p.head.ref.startsWith('ledger/auto-')))
+            );
+            core.setOutput('count', String(drafts.length));
+            const body = drafts.map(p => {
+              const ageH = Math.round((Date.now() - Date.parse(p.created_at)) / 36e5);
+              const age = ageH >= 48 ? `${Math.round(ageH / 24)}d` : `${ageH}h`;
+              return `#${p.number} — ${p.title}\n${p.html_url}\n(open ${age} · branch ${p.head.ref})`;
+            }).join('\n\n');
+            core.setOutput('body', body);
+            core.setOutput('subject', drafts.length === 1
+              ? `Ledger draft awaiting publish: ${drafts[0].title}`
+              : `${drafts.length} Ledger drafts awaiting publish`);
+            if (drafts.length) {
+              core.notice(`Ledger drafts open and unmerged: ${drafts.map(p => '#' + p.number).join(', ')}`);
+            } else {
+              core.info('No open Ledger drafts — nothing to alert.');
+            }
+
+      - name: Email the alert
+        if: steps.find.outputs.count != '0'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
+          password: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
+          from: Ledger Bot <${{ secrets.LEDGER_ALERT_SMTP_USER }}>
+          to: jasonpark@jparkassociates.com
+          subject: ${{ steps.find.outputs.subject }}
+          body: |
+            A Ledger article is drafted but not yet live on jparkassociates.com.
+            Merging its pull request is what publishes it.
+
+            ${{ steps.find.outputs.body }}
+
+            —
+            Automated daily check (.github/workflows/ledger-draft-alert.yml).
+            You'll keep getting this once a day until the PR is merged or closed.
