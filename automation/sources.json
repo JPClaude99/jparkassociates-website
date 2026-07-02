@@ -1,5 +1,5 @@
 {
-  "_comment": "Feeds the weekly Ledger scan checks (see PIPELINE.md Step 2). 'priority': primary sources are checked every run; secondary sources are checked when time permits or when a primary item points there. All are listing pages — fetch them and look at items from the last ~10 days.",
+  "_comment": "Feeds the weekly Ledger scan (see PIPELINE.md Step 2). 'priority': primary sources are checked every run; secondary when time permits or when a primary item points there. 'role': 'listing' sources are announcement feeds — fetch them and scan items from the last ~10 days (Pass A, look-back). 'role': 'calendar' sources are forward-looking due-date/rate-change pages — fetch them and capture any action/effective date in the next ~45 days (Pass B, look-ahead). A missing 'role' means 'listing'. The look-ahead pass exists because agencies post changes months before they take effect (e.g. a July 1 change announced in April) — triage on the action date, not the posting date.",
   "sources": [
     {
       "id": "irs-newsroom",
@@ -70,6 +70,38 @@
       "url": "https://www.thomsonreuters.com/en-us/help/ultratax-cs.html",
       "priority": "secondary",
       "focus": "Only client-visible impacts: e-file system outages/openings, new document requirements, major form availability delays. Internal software changes are never article material."
+    },
+    {
+      "id": "cdtfa-rate-changes",
+      "name": "CDTFA — Explanation of Tax Rate Changes",
+      "url": "https://www.cdtfa.ca.gov/taxes-and-fees/explanationoftaxratechanges.htm",
+      "priority": "primary",
+      "role": "calendar",
+      "focus": "Forward-looking: district sales/use tax rate changes organized by future operative date (quarter starts: Jan 1 / Apr 1 / Jul 1 / Oct 1), with the voter measure behind each. Check for LA-County jurisdictions (Glendale, Pasadena, unincorporated county, Foothill corridor) before each quarter — this is the earliest warning of a local rate change."
+    },
+    {
+      "id": "irs-tax-calendar",
+      "name": "IRS — Online Tax Calendar (businesses & self-employed)",
+      "url": "https://www.irs.gov/businesses/small-businesses-self-employed/online-tax-calendar",
+      "priority": "secondary",
+      "role": "calendar",
+      "focus": "Upcoming federal business filing/deposit due dates by quarter. Use to time deadline reminders (estimated taxes, payroll deposits, information returns) with lead time rather than after the fact."
+    },
+    {
+      "id": "ftb-due-dates",
+      "name": "FTB — Due dates for businesses",
+      "url": "https://www.ftb.ca.gov/file/when-to-file/due-dates-business.html",
+      "priority": "secondary",
+      "role": "calendar",
+      "focus": "California entity filing and payment due dates: corporation/LLC/partnership returns, LLC annual $800 tax and LLC fee, PTET election/payment timing. Pair with the IRS calendar for federal+CA deadline articles."
+    },
+    {
+      "id": "cdtfa-filing-dates",
+      "name": "CDTFA — Filing Dates for Sales & Use Tax Returns",
+      "url": "https://www.cdtfa.ca.gov/taxes-and-fees/sales-use-tax-returns-filing-dates.htm",
+      "priority": "secondary",
+      "role": "calendar",
+      "focus": "Recurring sales/use tax return and prepayment due dates by filing frequency (monthly, quarterly, quarterly-prepay, yearly). Use to time filing-deadline reminders for restaurants, retailers, and gas stations ahead of the date."
     }
   ]
 }
