@@ -20,6 +20,16 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "america-250-taxes-that-built-a-nation",
+    title: "America at 250: the taxes that built a nation",
+    excerpt: "The country turns 250 tomorrow — and it started as a tax dispute. A short history of American taxation, from 'no taxation without representation' and the Boston Tea Party to the return you'll file next spring.",
+    date: "2026-07-03",
+    category: "federal",
+    source: "J Park & Associates",
+    srcShort: "JP&A",
+    readMins: 7
+  },
+  {
     slug: "california-tobacco-retailer-license-fee-2026",
     title: "California tobacco retailer license fee jumps to $450 on July 1, 2026",
     excerpt: "If your store sells cigarettes or vapes, the CDTFA retailer license fee rose from $265 to $450 per location on July 1 — not prorated. Plus the distributor products tax dropped to 51.08% the same day.",
