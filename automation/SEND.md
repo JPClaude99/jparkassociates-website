@@ -43,7 +43,8 @@ in repo **Settings → Secrets and variables → Actions**.
 ## Go-live checklist (Phase 2)
 
 1. Create the Brevo account; authenticate `jparkassociates.com`
-   (SPF/DKIM/DMARC) and set a real `sender`/`replyTo` on that domain.
+   (SPF/DKIM/DMARC — see `automation/DNS-AUTH.md`) and set a real
+   `sender`/`replyTo` on that domain.
 2. Create one Brevo list per active segment; paste each numeric id into
    `lists` in `brevo.config.json`.
 3. Import contacts and assign each to its segment list.
