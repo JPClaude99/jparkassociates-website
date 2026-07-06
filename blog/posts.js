@@ -20,6 +20,16 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "july-31-2026-quarterly-tax-deadlines",
+    title: "Three business tax filings are due July 31, 2026 — the Q2 deadline for LA employers",
+    excerpt: "Federal payroll (Form 941), California payroll (DE 9/DE 9C), and the quarterly CDTFA sales tax return all come due Friday, July 31. Three agencies, one date — and filing isn't the same as depositing.",
+    date: "2026-07-06",
+    category: "deadlines",
+    source: "IRS / EDD / CDTFA",
+    srcShort: "Jul 31",
+    readMins: 5
+  },
+  {
     slug: "california-tobacco-retailer-license-fee-2026",
     title: "California tobacco retailer license fee jumps to $450 on July 1, 2026",
     excerpt: "If your store sells cigarettes or vapes, the CDTFA retailer license fee rose from $265 to $450 per location on July 1 — not prorated. Plus the distributor products tax dropped to 51.08% the same day.",
