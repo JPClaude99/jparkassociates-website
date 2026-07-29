@@ -11,7 +11,9 @@
 
    The forms on the site fire conversion events when analytics is
    active: stress_test_complete, and generate_lead with a `form`
-   param of stress_test_email / contact / newsletter.
+   param of stress_test_email / contact / newsletter / fit_inquiry.
+   The /fit/ form also fires fit_path_selected and fit_step_view
+   (path + step params) so per-step drop-off is visible.
    ============================================================ */
 (function () {
   "use strict";
