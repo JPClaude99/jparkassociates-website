@@ -508,7 +508,11 @@
       : "A CPA will read this and reply with a straight answer — including if another office is a better fit for what you need. No pressure either way.";
 
     const callBtn = '<a class="btn btn-gold" href="tel:+18182481580">Call (818) 248-1580</a>';
-    const emailBtn = '<a class="btn btn-ghost-light" href="mailto:justinpark@jparkassociates.com">Email Justin</a>';
+    /* Subject carries the ref so the office can match the thread to the
+       inquiry; the visible address in the hours line below is the fallback
+       for machines where mailto: opens nothing. */
+    const emailHref = "mailto:justinpark@jparkassociates.com?subject=" + encodeURIComponent("Fit inquiry " + refNumber);
+    const emailBtn = '<a class="btn btn-ghost-light" href="' + emailHref + '">Email Justin</a>';
     const ctas = exploring ? emailBtn + callBtn : callBtn + emailBtn;
     const urgencyLine = urgent
       ? '<p class="fit-urgency">Need it this week? Calling is fastest — the office picks up Mon–Fri, 9 to 5:30.</p>'
@@ -537,7 +541,7 @@
         "<p>" + body + "</p>" +
         urgencyLine +
         '<div class="fit-verdict-ctas" data-noprint>' + ctas + "</div>" +
-        '<p class="fit-hours" data-noprint>Mon–Fri, 9 AM–5:30 PM &middot; 2529 Foothill Blvd. Ste 101, La Crescenta</p>' +
+        '<p class="fit-hours" data-noprint>Mon–Fri, 9 AM–5:30 PM &middot; 2529 Foothill Blvd. Ste 101, La Crescenta &middot; <a href="' + emailHref + '">justinpark@jparkassociates.com</a></p>' +
       "</div>" +
       '<div class="fit-summary">' +
         "<h2>What we heard</h2>" +
