@@ -1265,6 +1265,8 @@ html.js .reveal.in { opacity: 1; transform: none; }
 }
 .fit-verdict-ctas { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 30px; }
 .fit-hours { margin-top: 16px; font-size: 0.85rem !important; color: rgba(245, 240, 232, 0.6) !important; }
+.fit-hours a { color: rgba(245, 240, 232, 0.85); text-decoration: underline; }
+.fit-hours a:hover { color: var(--gold-300); }
 
 .fit-summary {
   background: var(--white);
