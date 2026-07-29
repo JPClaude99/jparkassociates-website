@@ -1,38 +1,18 @@
 <!DOCTYPE html>
-<!-- ============================================================
-     THE LEDGER — article template (automation contract)
-     The announcement-tracking pipeline generates each article by
-     replacing the {{PLACEHOLDERS}} below and writing the result
-     to blog/<SLUG>.html, then prepends a matching entry to
-     blog/posts.js. Articles are pure static HTML — no JS needed.
-
-     Placeholders:
-       {{TITLE}}          plain-text headline
-       {{DESCRIPTION}}    1–2 sentence meta description / excerpt
-       {{CATEGORY_LABEL}} display label (e.g. "Deadlines")
-       {{SOURCE}}         issuing authority (e.g. "IRS")
-       {{DATE_ISO}}       yyyy-mm-dd
-       {{DATE_DISPLAY}}   e.g. "June 8, 2026"
-       {{READ_MINS}}      integer
-       {{SLUG}}           filename without .html
-       {{BODY_HTML}}      article body: <p>, <h2>, <ul>, plus the
-                          .callout / .action-list / .sources-box
-                          blocks (see existing articles for shape)
-     ============================================================ -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#111c33" />
-  <title>{{TITLE}} | J Park &amp; Associates</title>
-  <meta name="description" content="{{DESCRIPTION}}" />
-  <meta property="og:title" content="{{TITLE}}" />
-  <meta property="og:description" content="{{DESCRIPTION}}" />
-  <meta property="og:type" content="article" />
-  <meta property="og:url" content="https://jparkassociates.com/blog/{{SLUG}}.html" />
+  <title>See if we're a fit | J Park &amp; Associates</title>
+  <meta name="description" content="A few quick questions — no SSN, no uploads, no obligation — and we'll tell you honestly whether J Park &amp; Associates is the right CPA office for you or your business." />
+  <meta property="og:title" content="See if we're a fit | J Park &amp; Associates" />
+  <meta property="og:description" content="Two minutes of tap-to-answer questions, then an honest answer about whether we're the right CPA office for you. No account, no documents." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jparkassociates.com/fit/" />
   <meta property="og:image" content="https://jparkassociates.com/assets/og-image.jpg" />
   <meta name="twitter:card" content="summary_large_image" />
-  <link rel="canonical" href="https://jparkassociates.com/blog/{{SLUG}}.html" />
+  <link rel="canonical" href="https://jparkassociates.com/fit/" />
   <link rel="icon" href="../assets/favicon/favicon.ico" sizes="any" />
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon/favicon-32.png" />
   <link rel="apple-touch-icon" href="../assets/favicon/apple-touch-icon-180.png" />
@@ -40,19 +20,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600;1,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../styles.css?v=16" />
-  <link rel="stylesheet" href="../blog.css?v=3" />
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    "headline": "{{TITLE}}",
-    "description": "{{DESCRIPTION}}",
-    "datePublished": "{{DATE_ISO}}",
-    "url": "https://jparkassociates.com/blog/{{SLUG}}.html",
-    "author": { "@type": "Organization", "name": "J Park & Associates" },
-    "publisher": { "@type": "AccountingService", "name": "J Park & Associates", "url": "https://jparkassociates.com" }
-  }
-  </script>
+  <style>
+    @media print {
+      .nav, .sidebar, .sidebar-scrim, .footer, [data-noprint] { display: none !important; }
+      body { background: #fff; font-size: 11pt; }
+      .fit-verdict { box-shadow: none; }
+      .fit-sumrow { break-inside: avoid; }
+      @page { margin: 0.6in; }
+    }
+  </style>
 </head>
 <body>
 
@@ -65,13 +41,15 @@
       <li><a href="../index.html#pain">Pain points</a></li>
       <li><a href="../index.html#industries">Industries</a></li>
       <li><a href="../index.html#how">How it works</a></li>
-      <li><a href="../blog.html" aria-current="page">Insights</a></li>
+      <li><a href="../blog.html">Insights</a></li>
       <li><a href="../index.html#contact">Contact</a></li>
     </ul>
     <div class="nav-right">
-      <a class="btn btn-gold nav-cta" href="../fit/">
-        <span class="label-full">See if we&rsquo;re a fit</span>
-        <span class="label-short">Are we a fit?</span>
+      <!-- On the fit page itself the fit CTA would be self-referential,
+           so the header's one gold slot becomes the phone. -->
+      <a class="btn btn-gold nav-cta" href="tel:+18182481580">
+        <span class="label-full">Call (818) 248-1580</span>
+        <span class="label-short">Call us</span>
       </a>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">
         <span aria-hidden="true"></span>
@@ -95,7 +73,7 @@
       <a href="../tools/index.html">Tools &amp; calculators</a>
       <a href="../index.html#contact">Contact</a>
     </nav>
-    <a class="btn btn-gold sidebar-cta" href="../fit/">See if we&rsquo;re a fit</a>
+    <a class="btn btn-gold sidebar-cta" href="tel:+18182481580">Call (818) 248-1580</a>
     <div class="sidebar-contact">
       <a href="tel:+18182481580">(818)&nbsp;248-1580</a>
       <a href="mailto:justinpark@jparkassociates.com">justinpark@jparkassociates.com</a>
@@ -103,36 +81,27 @@
     </div>
   </aside>
 
-  <header class="article-hero">
-    <div class="container-narrow">
-      <a class="crumb" href="../blog.html">The Ledger</a>
-      <span class="cat">{{CATEGORY_LABEL}}</span>
-      <h1>{{TITLE}}</h1>
-      <div class="post-meta">
-        <span class="src-tag">{{SOURCE}}</span>
-        <span class="dot">&middot;</span>
-        <time datetime="{{DATE_ISO}}">{{DATE_DISPLAY}}</time>
-        <span class="dot">&middot;</span>
-        <span>{{READ_MINS}} min read</span>
-      </div>
-    </div>
-  </header>
-
-  <main class="article-body">
-    <div class="container-narrow">
-{{BODY_HTML}}
-      <p class="disclaimer">This article is general information, not tax advice for your specific situation. Rules change and details matter &mdash; talk to a CPA (we know one) before acting on anything here.</p>
+  <main class="fit-main">
+    <div class="fit-wrap" id="fit-app">
+      <noscript>
+        <div class="fit-start">
+          <h1>See if we&rsquo;re a fit</h1>
+          <p class="fit-lede">This form needs JavaScript for the step-by-step version &mdash; but you can send us the short version below, or call <a href="tel:+18182481580">(818) 248-1580</a>.</p>
+        </div>
+        <form class="fit-noscript" action="https://api.web3forms.com/submit" method="POST">
+          <input type="hidden" name="access_key" value="f157657a-37a9-47ec-9b50-3b8960d41025" />
+          <input type="hidden" name="subject" value="Fit inquiry (no-JS) — jparkassociates.com/fit" />
+          <input type="hidden" name="from_name" value="Fit Form" />
+          <input type="hidden" name="cc" value="justinparkcpa@gmail.com" />
+          <label>Your name <input type="text" name="name" autocomplete="name" required /></label>
+          <label>Email <input type="email" name="email" autocomplete="email" required /></label>
+          <label>Phone (optional) <input type="tel" name="phone" autocomplete="tel" /></label>
+          <label>What do you need handled? <textarea name="message" rows="5" placeholder="Books, taxes, payroll, a notice — and roughly when you need it."></textarea></label>
+          <button type="submit" class="btn btn-gold">Send it</button>
+        </form>
+      </noscript>
     </div>
   </main>
-
-  <section class="article-cta">
-    <h2>Rather have this handled than explained?</h2>
-    <p>That&rsquo;s the actual service. Books, taxes, payroll, and every deadline above &mdash; managed on our calendar, not yours.</p>
-    <div class="cta-row">
-      <a class="btn btn-gold" href="../index.html#stress-test">Run the 2-minute stress test</a>
-      <a class="btn btn-ghost-light" href="../index.html#contact">Book a 15-minute call</a>
-    </div>
-  </section>
 
   <footer class="footer">
     <div class="footer-grid">
@@ -152,7 +121,8 @@
           <li><a href="mailto:justinpark@jparkassociates.com">justinpark@jparkassociates.com</a></li>
           <li><a href="tel:+18182481580">(818) 248-1580</a></li>
           <li><a href="../index.html#stress-test">Free tax-season stress test</a></li>
-          <li><a href="../blog.html">The Ledger — insights</a></li>
+          <li><a href="../blog.html">The Ledger &mdash; insights</a></li>
+          <li><a href="../tools/index.html">Tools &amp; calculators</a></li>
         </ul>
       </div>
     </div>
@@ -163,6 +133,7 @@
   </footer>
 
   <script src="../nav.js?v=1"></script>
+  <script src="../fit.js?v=1"></script>
   <script src="../analytics.js?v=1"></script>
 </body>
 </html>
