@@ -20,6 +20,16 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "irs-automatic-penalty-relief-2026",
+    title: "IRS penalty relief is now automatic — what the new AEP means for small businesses",
+    excerpt: "The IRS is replacing First-Time Abate with a new Automatic Exemption from Penalty (AEP). Relief for late filing, late payment, and missed payroll deposits now applies on its own — if your last three years are clean.",
+    date: "2026-07-28",
+    category: "federal",
+    source: "IRS",
+    srcShort: "IRS",
+    readMins: 5
+  },
+  {
     slug: "july-31-2026-quarterly-tax-deadlines",
     title: "Three business tax filings are due July 31, 2026 — the Q2 deadline for LA employers",
     excerpt: "Federal payroll (Form 941), California payroll (DE 9/DE 9C), and the quarterly CDTFA sales tax return all come due Friday, July 31. Three agencies, one date — and filing isn't the same as depositing.",
