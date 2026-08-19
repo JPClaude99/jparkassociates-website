@@ -77,7 +77,11 @@ result differs per client.
 5. Check it with Gmail's dark theme on, and on the phone app, before sending.
 
 `preview.html` renders the signature and all four logo options on light and dark
-backgrounds side by side, for eyeballing changes without sending test mail.
+backgrounds side by side, for eyeballing changes without sending test mail. It
+also shows `specimen-before-760.png` — the old transparent, navy-ink logo at the
+same geometry as the plates — so the before/after is a like-for-like comparison.
+That file is a proofing specimen only; it is not a brand asset and should not be
+used in a signature.
 
 ## Assets
 
