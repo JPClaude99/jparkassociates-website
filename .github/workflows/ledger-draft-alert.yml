@@ -147,6 +147,11 @@ jobs:
           secure: true
           username: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
           password: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
+          # Gmail only lets you send as the authenticated mailbox itself or an
+          # address verified on it under Settings → Accounts → "Send mail as".
+          # If marketing@ is not verified on the LEDGER_ALERT_SMTP_USER account,
+          # Gmail rewrites the From (or rejects with 550-5.7.1) — the display
+          # name and avatar in the inbox follow whichever address actually sends.
           from: The Ledger Bot <marketing@jparkassociates.com>
           to: jasonpark@jparkassociates.com
           subject: ${{ steps.find.outputs.subject }}
