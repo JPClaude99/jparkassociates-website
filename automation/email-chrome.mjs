@@ -101,6 +101,11 @@ export function emailShell(o) {
     .e-item   { background-color: #22304c !important; border-color: #3d4d6e !important; }
     .e-callout{ background-color: #22304c !important; }
     .e-cta    { border: 1px solid #3d4d6e !important; }
+    /* A table header cell carried .t-strong (which flips to cream) and a cream
+       background that did not, so every rate-table header measured 1.00:1 —
+       cream on cream, invisible — in Apple Mail, iOS Mail and Gmail web dark. */
+    .e-th     { background-color: #2b3a5c !important; }
+    .e-cell   { border-color: #3d4d6e !important; }
     .t-title, .t-strong { color: ${C.CREAM} !important; }
     .t-body   { color: #cbd3e1 !important; }
     .t-muted, .t-foot { color: #9aa6bd !important; }
@@ -111,6 +116,8 @@ export function emailShell(o) {
   [data-ogsb] .e-card,    .e-card[data-ogsb]    { background-color: #16203a !important; }
   [data-ogsb] .e-item,    .e-item[data-ogsb]    { background-color: #22304c !important; border-color: #3d4d6e !important; }
   [data-ogsb] .e-callout, .e-callout[data-ogsb] { background-color: #22304c !important; }
+  [data-ogsb] .e-th,      .e-th[data-ogsb]      { background-color: #2b3a5c !important; }
+  [data-ogsb] .e-cell,    .e-cell[data-ogsb]    { border-color: #3d4d6e !important; }
   [data-ogsb] .e-cta,     .e-cta[data-ogsb]     { border: 1px solid #3d4d6e !important; }
   [data-ogsc] .t-title,   .t-title[data-ogsc],
   [data-ogsc] .t-strong,  .t-strong[data-ogsc]  { color: ${C.CREAM} !important; }
@@ -161,6 +168,14 @@ export function emailShell(o) {
     <p class="t-foot" style="margin:0 0 6px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">
       J Park &amp; Associates &middot; Certified Public Accountants<br />
       2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214 &middot; (818) 248-1580
+    </p>
+    <!-- The firm bio, verbatim from blog/_template.html and emails/_template.html.
+         The Ledger's own mail is the one place it was missing, so the weekly
+         review and the publish notice were the only J Park & Associates pages
+         whose footer did not say who the firm is. -->
+    <p class="t-foot" style="margin:0 0 6px;font:400 11px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">
+      A personalized CPA office on Foothill Blvd. in La Crescenta, keeping the books, taxes,
+      and payroll of Crescenta Valley and Los Angeles businesses in order for over 15 years.
     </p>
     <p class="t-foot" style="margin:0;font:400 11px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">${o.footNote}</p>
   </td></tr>
@@ -246,26 +261,43 @@ const tableHtml = rows => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;border-collapse:collapse;">
       ${rows.map(r => `<tr>${r.cells.map(cell => {
         const c = typeof cell === 'string' ? { html: cell, colspan: 1, rowspan: 1 } : cell;
-        const tag = r.header ? 'th' : 'td';
+        // Three kinds of cell, not two: a column heading (cream, bold), a row
+        // LABEL — a <th> in a row that also has data cells, which the browser
+        // bolds but does not fill — and a data cell.
+        const isTh = c.header ?? r.header;
+        const tag = isTh ? 'th' : 'td';
         const span = `${c.colspan > 1 ? ` colspan="${c.colspan}"` : ''}${c.rowspan > 1 ? ` rowspan="${c.rowspan}"` : ''}`;
         const style = r.header
           ? `background-color:${C.CREAM};font:700 13px/1.5 Arial,Helvetica,sans-serif;color:${C.NAVY_900};`
-          : `font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${C.SLATE};`;
-        return `<${tag} class="${r.header ? 't-strong' : 't-body'}" align="left" valign="top"${span}` +
+          : isTh
+            ? `font:700 13px/1.5 Arial,Helvetica,sans-serif;color:${C.NAVY_900};`
+            : `font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${C.SLATE};`;
+        // e-th / e-cell so the header's GROUND and the rule between cells move
+        // with the text when a client flips to dark. Without the first of them
+        // .t-strong turned the header text cream on a cream cell.
+        return `<${tag} class="e-cell ${r.header ? 't-strong e-th' : isTh ? 't-strong' : 't-body'}" align="left" valign="top"${span}` +
                `${r.header ? ` bgcolor="${C.CREAM}"` : ''} style="${style}border:1px solid #e8e2d6;padding:8px 10px;">${c.html}</${tag}>`;
       }).join('')}</tr>`).join('')}
     </table>`;
 
-const preHtml = text => `
+// `html` when the block carried markup — a citation link inside a code sample
+// is the whole reason a reviewer would look at one.
+const preHtml = (text, html) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;"><tr>
       <td class="e-callout" bgcolor="${C.CREAM}" style="background-color:${C.CREAM};border-radius:8px;padding:14px 16px;">
-        <pre style="margin:0;font:400 12px/1.55 Consolas,Menlo,monospace;color:${C.SLATE};white-space:pre-wrap;word-break:break-word;">${esc(text)}</pre>
+        <pre class="t-body" style="margin:0;font:400 12px/1.55 Consolas,Menlo,monospace;color:${C.SLATE};white-space:pre-wrap;word-break:break-word;">${html || esc(text)}</pre>
       </td>
     </tr></table>`;
 
 /** The navy "do this before <date>" block. Checkmarks are cells, not bullets:
     list-style images are stripped by Outlook and ::before never renders. */
-const actionHtml = (heading, items, lead = []) => `
+const actionHtml = (heading, items, lead = [], ordered = false, start = 1) => {
+  // An ORDERED checklist numbers its steps in the marker column instead of
+  // repeating the checkmark: the packet renders the <ol> markers, and a panel
+  // that dropped them left "fix step 4" pointing at nothing.
+  let n = start;
+  const marker = i => (i && i.cont ? '' : ordered ? `${n++}.` : '&#10003;');
+  return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
       <td class="e-cta" bgcolor="${C.NAVY_900}" style="background-color:${C.NAVY_900};border-radius:10px;padding:20px 24px;">
         ${heading ? `<p style="margin:0 0 12px;font:700 15px/1.35 ${SERIF};color:${C.GOLD_PILL};">${esc(heading)}</p>` : ''}
@@ -273,12 +305,13 @@ const actionHtml = (heading, items, lead = []) => `
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
           ${items.map(i => `
           <tr>
-            <td width="20" valign="top" style="font:700 14px/1.6 ${SERIF};color:${C.GOLD_PILL};">${i && i.cont ? '' : '&#10003;'}</td>
+            <td width="20" valign="top" style="font:700 14px/1.6 ${SERIF};color:${C.GOLD_PILL};">${marker(i)}</td>
             <td style="font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};padding-bottom:7px;">${indent(i)}</td>
           </tr>`).join('')}
         </table>
       </td>
     </tr></table>`;
+};
 
 /* Indent a nested item rather than flattening it. listHtml was fixed to honour
    depth and these two call sites were not, so a sub-step of an action item read
@@ -287,13 +320,13 @@ const indent = i => (typeof i === 'string' ? i : (i.depth
   ? `<span style="padding-left:${i.depth * 16}px;display:inline-block;">&#8250; ${i.html}</span>`
   : i.html));
 
-const sourcesHtml = (label, items) => `
+const sourcesHtml = (label, items, ordered = false, start = 1) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
       <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
         ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
-        <ul class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
+        <${ordered ? 'ol' : 'ul'}${ordered && start !== 1 ? ` start="${Number(start)}"` : ''} class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
           ${items.map(i => `<li style="margin:0 0 5px;${i && i.cont ? 'list-style:none;' : ''}">${indent(i)}</li>`).join('')}
-        </ul>
+        </${ordered ? 'ol' : 'ul'}>
       </td>
     </tr></table>`;
 
@@ -314,13 +347,13 @@ export function articleBlocksHtml(blocks) {
       case 'table':
         return tableHtml(b.rows);
       case 'pre':
-        return preHtml(b.text);
+        return preHtml(b.text, b.html);
       case 'callout':
         return `<div style="margin:0 0 18px;">${callout(b.label || '', articleBlocksHtml(b.blocks))}</div>`;
       case 'action':
-        return actionHtml(b.heading, b.items, b.lead);
+        return actionHtml(b.heading, b.items, b.lead, b.ordered, b.start);
       case 'sources':
-        return sourcesHtml(b.label, b.items);
+        return sourcesHtml(b.label, b.items, b.ordered, b.start);
       case 'disclaimer':
         return `<p class="t-muted" style="margin:0 0 4px;font:italic 400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">${b.html}</p>`;
       default:

@@ -86,11 +86,20 @@ async function main() {
   const pr = await gh(`/repos/${REPO}/pulls/${prNumber}`);
   const files = await ghPaged(`/repos/${REPO}/pulls/${prNumber}/files`);
 
-  // NEWLY published only. 'modified' is a correction to an article that went
-  // live weeks ago; announcing "it's live" again is a duplicate notice about
-  // old news. A rename gives the article a new URL, so that one does count.
+  /* NEWLY published only. 'modified' is a correction to an article that went
+     live weeks ago; announcing "it's live" again is a duplicate notice about
+     old news. A rename gives the article a new URL, so that one does count.
+
+     'copied' and 'changed' count too, and leaving them out was a silent miss:
+     GitHub reports 'copied' when git's copy detection matches a new file
+     against an existing one, which is exactly the shape of a new article
+     rendered from blog/_template.html or written from a sibling. Pages serves
+     the file whichever word the API used, so the article was live, unannounced,
+     and the orphan alarm below never fired either — the slug had already been
+     dropped. Everything except 'modified' and 'removed'. */
+  const NEW = new Set(['added', 'renamed', 'copied', 'changed']);
   const candidates = files
-    .filter(f => f.status === 'added' || f.status === 'renamed')
+    .filter(f => NEW.has(f.status))
     .map(f => /^blog\/([^/]+)\.html$/.exec(f.filename))
     .filter(Boolean)
     .map(m => m[1])
@@ -104,7 +113,12 @@ async function main() {
   // site. The API returns changed files alphabetically, which does not.
   const wanted = new Set(slugs);
   const posts = await manifest();
-  const published = posts.filter(p => wanted.has(p.slug));
+  /* One entry per slug. blog/posts.js is hand-prepended by the scan agent, and
+     a slug listed twice there had its article announced twice in the same
+     notice — "3 Ledger articles are live" for two files. The first entry wins,
+     which is the one the blog index shows first. */
+  const seen = new Set();
+  const published = posts.filter(p => wanted.has(p.slug) && !seen.has(p.slug) && seen.add(p.slug));
 
   // Clean no-op: a Ledger PR may legitimately touch only automation, or only
   // correct an article that is already live.
@@ -144,7 +158,8 @@ async function main() {
     </p>
     ${published.map(p => panel(`
       <p class="t-gold" style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GOLD_TEXT};">
-        ${esc(LABELS[p.category] || p.category)} &middot; ${esc(p.readMins)} min read
+        ${[esc(LABELS[p.category] || p.category), p.readMins ? `${esc(p.readMins)} min read` : '']
+            .filter(Boolean).join(' &middot; ')}
       </p>
       <p class="t-title" style="margin:0 0 10px;font:700 18px/1.35 Georgia,'Times New Roman',serif;color:${C.NAVY_900};">${esc(p.title)}</p>
       <p class="t-body" style="margin:0 0 12px;font:400 14px/1.55 Arial,Helvetica,sans-serif;color:${C.SLATE};">${esc(p.excerpt)}</p>
@@ -176,7 +191,11 @@ async function main() {
     '',
     ...published.flatMap((p, i) => [
       `${i + 1}. ${p.title}`,
-      `   ${LABELS[p.category] || p.category} · ${p.readMins} min read`,
+      // A manifest entry missing readMins printed a literal "undefined min read"
+      // in the plain-text part while the HTML part printed nothing — the two
+      // alternatives of one message disagreeing.
+      `   ${[LABELS[p.category] || p.category, p.readMins ? `${p.readMins} min read` : '']
+             .filter(Boolean).join(' · ')}`,
       `   ${SITE}${p.slug}.html`,
       `   ${p.excerpt}`,
       '',

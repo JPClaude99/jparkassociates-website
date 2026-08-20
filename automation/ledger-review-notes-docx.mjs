@@ -100,7 +100,41 @@ async function prArticleFiles(number) {
     .filter(f => f.status !== 'removed')
     .filter(f => /^blog\/[^/]+\.html$/.test(f.filename))
     .filter(f => !f.filename.endsWith('/_template.html'))
-    .map(f => f.filename);
+    // Through xmlSafe, like everything else that reaches a <w:t>. The header
+    // note claims C0 characters are stripped where data enters this file, and
+    // this was the one path that bypassed it: [^/]+ happily matches a form feed,
+    // and one byte of it produced a valid zip full of unparseable XML — the
+    // "Word found unreadable content" dialog, with the run still exiting 0.
+    .map(f => xmlSafe(f.filename));
+}
+
+/* The article's OWN <h1>, which is what the email and the PDF packet call it.
+   Titling the draft from the pull-request body heading instead meant one run
+   produced three artifacts naming the same draft two different things —
+   "Sep 15 extended returns" in the Word note against "Extended S corp and
+   partnership returns are due September 15, 2026" everywhere else. Best effort:
+   a hiccup here costs the nicer title, never the note. */
+async function articleTitle(path, ref) {
+  if (!REPO || !process.env.GITHUB_TOKEN) return '';
+  try {
+    const res = await fetch(
+      `${API}/repos/${REPO}/contents/${encodeURI(path)}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`, {
+        headers: {
+          accept: 'application/vnd.github.raw',
+          authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+          'x-github-api-version': '2022-11-28',
+          'user-agent': 'ledger-review-notes',
+        },
+      });
+    if (!res.ok) return '';
+    const html = await res.text();
+    const m = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    if (!m) return '';
+    const t = m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&rsquo;/g, '\u2019')
+                  .replace(/&nbsp;/g, ' ').replace(/&mdash;/g, '\u2014').replace(/\s+/g, ' ').trim();
+    return xmlSafe(t);
+  } catch { return ''; }
 }
 
 /* ---------- markdown -> Word --------------------------------------------- */
@@ -110,7 +144,12 @@ async function prArticleFiles(number) {
  * inline code and links, including bold inside a link. Anything unrecognised
  * stays literal text — a stray asterisk must never eat the rest of a sentence.
  */
-function runs(md, base = {}) {
+function runs(md, base = {}, depth = 0) {
+  /* Every emphasis branch recurses now, so the "cannot recurse more than once"
+     that used to hold for link text no longer does. Each step strictly shortens
+     the string, so this terminates on its own; the cap is a backstop against a
+     pathological body, and falling back to a plain run loses styling, never text. */
+  if (depth > 6) return [new TextRun({ text: md, font: SANS, size: pt(10), color: SLATE, ...base })];
   const out = [];
   /* Notes on the alternatives, each of which was a bug first:
      - `_` emphasis is guarded against word characters on both sides. GFM
@@ -123,12 +162,22 @@ function runs(md, base = {}) {
        publication anchors do the same. A plain [^)]+ stops at the inner paren,
        producing a dead link and leaking the stray ")" into the sentence. */
   const re = new RegExp([
+    // *** *** first, or the ** branch claims the outer pair and leaves a
+    // stray asterisk on each side of the text.
+    '\\*\\*\\*(?<bi>.+?)\\*\\*\\*',
     '\\*\\*(?<b1>.+?)\\*\\*',
     '(?<![A-Za-z0-9_])__(?<b2>.+?)__(?![A-Za-z0-9_])',
     '\\*(?!\\s)(?<i1>.+?)(?<!\\s)\\*',
     '(?<![A-Za-z0-9_])_(?!\\s)(?<i2>.+?)(?<!\\s)_(?![A-Za-z0-9_])',
+    // Double-backtick first: a span written ``a ` b`` holds a literal
+    // backtick, and the single-backtick branch closed on it and
+    // mis-delimited the rest of the line into monospace.
+    '``(?<code2>(?:[^`]|`(?!`))+)``',
     '`(?<code>[^`]+)`',
-    '\\[(?<text>[^\\]]*)\\]\\((?<url>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
+    // Link text may itself contain balanced brackets — "[Form 1099-NEC
+    // [instructions]](https://…)" is ordinary GFM and used to print whole,
+    // as text, with no link on it at all.
+    '\\[(?<text>(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]\\((?<url>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
     // A bare CommonMark autolink. The PDF renders it as a live link; the
     // Word note printed the angle brackets and no hyperlink at all.
     '<(?<auto>https?://[^>\\s]+)>',
@@ -141,12 +190,29 @@ function runs(md, base = {}) {
     last = m.index + m[0].length;
     const g = m.groups;
     const bold = g.b1 ?? g.b2, ital = g.i1 ?? g.i2;
-    if (bold !== undefined) {
-      out.push(new TextRun({ text: bold, font: SANS, size: pt(10), color: NAVY_900, ...base, bold: true }));
+    /* RECURSE, do not emit the capture as a flat run. Only the link branch used
+       to descend, so anything WRAPPING a link swallowed it: PIPELINE.md's own
+       "**Source** **[IRS Notice 2026-12](https://…)**" citation convention
+       printed the whole bracket-and-parenthesis form as literal text, in bold,
+       with no hyperlink in the document at all — the reviewer's one route back
+       to the source. Emphasis nested inside emphasis was flattened the same
+       way. Every branch now recurses, with its own styling folded into `base`
+       so the inner runs inherit it. */
+    if (g.bi !== undefined) {
+      out.push(...runs(g.bi, { ...base, bold: true, italics: true }, depth + 1));
+    } else if (bold !== undefined) {
+      out.push(...runs(bold, { ...base, bold: true, color: NAVY_900 }, depth + 1));
     } else if (ital !== undefined) {
-      out.push(new TextRun({ text: ital, font: SANS, size: pt(10), color: SLATE, ...base, italics: true }));
-    } else if (g.code !== undefined) {
-      out.push(new TextRun({ text: g.code, font: 'Consolas', size: pt(9.5), color: NAVY_700, ...base }));
+      out.push(...runs(ital, { ...base, italics: true }, depth + 1));
+    } else if (g.code !== undefined || g.code2 !== undefined) {
+      // color AFTER the spread: inside a bold run `base.color` is navy-900, and
+      // spreading it last repainted code spans with it.
+      // CommonMark strips ONE leading and trailing space when both are present
+      // and the span is not all spaces — that is how ``` `` ` `` ``` yields a
+      // lone backtick. Not a trim(): interior padding is content.
+      const raw = g.code ?? g.code2;
+      const codeText = /^ [\s\S]* $/.test(raw) && raw.trim() ? raw.slice(1, -1) : raw;
+      out.push(new TextRun({ text: codeText, font: 'Consolas', size: pt(9.5), ...base, color: NAVY_700 }));
     } else {
       if (g.auto !== undefined) {
         // A bare autolink: the text and the target are the same string.
@@ -168,7 +234,7 @@ function runs(md, base = {}) {
       const url = g.url.replace(/^<(.*)>$/s, '$1');
       out.push(new ExternalHyperlink({
         link: url,
-        children: g.text ? runs(g.text, style)
+        children: g.text ? runs(g.text, style, depth + 1)
                          : [new TextRun({ text: url, font: SANS, size: pt(10), ...style })],
       }));
     }
@@ -186,9 +252,13 @@ const noteHeading = (text, level) => new Paragraph({
   })],
 });
 
-const bullet = (md, ordered, level) => new Paragraph({
+/* `instance` is what makes two ordered lists two lists. With a single instance
+   Word continues one sequence through the whole document, so the "After
+   merging" list under article 2 came out 3. 4. rather than 1. 2. — and kept
+   climbing for every list in every draft. */
+const bullet = (md, ordered, level, instance = 0) => new Paragraph({
   spacing: { after: 60 },
-  ...(ordered ? { numbering: { reference: 'ledger-ol', level } } : { bullet: { level } }),
+  ...(ordered ? { numbering: { reference: 'ledger-ol', level, instance } } : { bullet: { level } }),
   children: runs(md),
 });
 
@@ -223,10 +293,15 @@ function mdTable(lines) {
  * `###`/`####` headings, `-` bullets, `1.` lists, tables, links and emphasis.
  * Unknown constructs degrade to plain paragraphs rather than being dropped.
  */
+/* Module-level, so two notes in the same document never share an instance and
+   a second article's "1. 2." cannot continue the first's. */
+let olInstance = 0;
+
 function mdBlocks(md) {
   const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
   const out = [];
   let para = [];
+  let inOl = false;
 
   const flush = () => {
     if (!para.length) return;
@@ -243,9 +318,21 @@ function mdBlocks(md) {
     // markers printed as prose.
     if (/^(```|~~~)/.test(t)) {
       flush();
-      const fence = t.slice(0, 3);
+      /* CHARACTER AND LENGTH, both. Matching on the first three characters
+         alone meant a ```` ```` ```` block quoting a ``` block closed on the
+         INNER fence: the quoted sample came out empty and the "## 1. Title"
+         inside it was promoted to a real heading in the middle of the notes.
+         The mirror case — a ~~~~ block closed on a ~~~ line — swallowed the
+         rest of the section into one code block. CommonMark: a closing fence
+         is the same character and AT LEAST as long. ledger-notes.mjs has
+         always got this right; this file had not. */
+      const open = t.match(/^(`{3,}|~{3,})/)[1];
+      const closes = ln => {
+        const m = ln.trim().match(/^(`{3,}|~{3,})\s*$/);
+        return !!m && m[1][0] === open[0] && m[1].length >= open.length;
+      };
       const code = [];
-      for (i++; i < lines.length && !lines[i].trim().startsWith(fence); i++) code.push(lines[i]);
+      for (i++; i < lines.length && !closes(lines[i]); i++) code.push(lines[i]);
       if (code.length) {
         out.push(new Paragraph({
           spacing: { after: 120 },
@@ -268,6 +355,18 @@ function mdBlocks(md) {
       out.push(noteHeading(t.replace(/^#+\s*/, ''), depth <= 3 ? 3 : 4));
       continue;
     }
+    /* SETEXT headings — "Sources checked" over a row of = or -. The PDF packet
+       renders them as headings; here the underline was swallowed by the rule
+       branch below and the title left as body prose, or, with =, the two lines
+       ran together into one paragraph. Checked before the rule branch, because
+       a --- under text is a heading and a --- under a blank line is a rule. */
+    const under = lines[i + 1] && lines[i + 1].trim();
+    if (t && !inOl && under && /^(=+|-{2,})$/.test(under) && !/^[-*+]\s/.test(t)) {
+      flush();
+      out.push(noteHeading(t, under[0] === '=' ? 3 : 4));
+      i++;
+      continue;
+    }
     if (/^([-*_])\1{2,}$/.test(t)) { flush(); continue; }        // horizontal rule
 
     if (t.startsWith('|') && lines[i + 1] && /^\s*\|?[\s:|-]*-[\s:|-]*\|/.test(lines[i + 1])) {
@@ -280,10 +379,19 @@ function mdBlocks(md) {
     }
 
     const li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+    // Any non-blank line that is NOT a list item ends the run. A blank one does
+    // not — a loose list is still one list, and restarting it there would put
+    // two "1."s in what the reader sees as a single sequence.
+    if (!li && t) inOl = false;
     if (li) {
       flush();
       const level = Math.min(2, Math.floor(li[1].replace(/\t/g, '  ').length / 2));
-      out.push(bullet(li[3], /\d/.test(li[2]), level));
+      const ordered = /\d/.test(li[2]);
+      // A new numbering instance whenever an ordered list STARTS — that is,
+      // when this ordered item does not directly follow another one.
+      if (ordered && !inOl) olInstance++;
+      inOl = ordered;
+      out.push(bullet(li[3], ordered, level, olInstance));
       continue;
     }
 
@@ -444,7 +552,8 @@ async function main() {
     );
 
     for (const path of paths) {
-      children.push(...articleBlock(titles.get(path) || path.replace(/^blog\/|\.html$/g, ''),
+      const h1 = await articleTitle(path, pr.head && pr.head.sha);
+      children.push(...articleBlock(h1 || titles.get(path) || path.replace(/^blog\/|\.html$/g, ''),
                                     path, byFile.get(path)));
     }
 

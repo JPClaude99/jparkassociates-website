@@ -229,7 +229,12 @@ async function extractArticle(page, html) {
 
     const BLOCK = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'TABLE',
                            'DL', 'PRE', 'BLOCKQUOTE', 'DIV', 'SECTION', 'ASIDE', 'FIGURE',
-                           'HR', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'FORM']);
+                           'HR', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'FORM',
+                           // The ITEMS too, not just their containers. Left out,
+                           // flatten() appended them verbatim and a list inside a
+                           // table cell came out "CELLA first itemCELLB second
+                           // item" — two bullets welded into one nonsense word.
+                           'LI', 'DT', 'DD']);
     // Blocks that become their own email block wherever they are found. Kept
     // apart from BLOCK because a <div> is a wrapper to walk through, while a
     // <table> is a thing to render.
@@ -259,9 +264,31 @@ async function extractArticle(page, html) {
         case 'B':      return `<strong class="t-strong" style="color:${strong};font-weight:700;">${inline(n, onNavy)}</strong>`;
         case 'EM':
         case 'I':      return `<em>${inline(n, onNavy)}</em>`;
-        case 'CODE':   return `<code style="font-family:Consolas,Menlo,monospace;font-size:13px;color:${mono};">${inline(n, onNavy)}</code>`;
+        // Classed, like every other coloured run: `mono` is the body colour on
+        // the light ground and the strong colour on navy, and without the class
+        // the ground flipped to dark under it and the colour did not.
+        case 'CODE':   return `<code class="${onNavy ? 't-strong' : 't-body'}" style="font-family:Consolas,Menlo,monospace;font-size:13px;color:${mono};">${inline(n, onNavy)}</code>`;
         case 'SUP':    return `<sup>${inline(n, onNavy)}</sup>`;
         case 'SUB':    return `<sub>${inline(n, onNavy)}</sub>`;
+        /* Emphasis that CHANGES THE FACT, and that the default branch used to
+           flatten to plain text: "the rate is <del>800</del> <ins>500</ins>"
+           arrived as "the rate is 800 500" — a superseded figure reading as a
+           current one, and a sentence quoting two prices. The packet draws all
+           of these from the UA stylesheet, so it always showed them. Styled as
+           well as tagged: Outlook honours neither <s> nor <ins> reliably. */
+        case 'DEL':
+        case 'S':
+        case 'STRIKE': return `<s style="text-decoration:line-through;">${inline(n, onNavy)}</s>`;
+        case 'INS':
+        case 'U':      return `<u style="text-decoration:underline;">${inline(n, onNavy)}</u>`;
+        // Both colours stated, so a client that flips the ground cannot leave
+        // navy type on a navy highlight.
+        case 'MARK':   return `<span style="background-color:${P.GOLD_PILL};color:${P.NAVY_900};padding:0 2px;">${inline(n, onNavy)}</span>`;
+        case 'Q':      return `&ldquo;${inline(n, onNavy)}&rdquo;`;
+        // `dir` is in KEEP_ATTR, so the packet reverses the run and the email,
+        // which rebuilds tags without attributes, did not: the same sentence
+        // printed the date 2026-09-15 in one artifact and 51-90-6202 in the other.
+        case 'BDO':    return `<bdo dir="${escHtml(n.getAttribute('dir') || 'ltr')}">${inline(n, onNavy)}</bdo>`;
         case 'SCRIPT':
         case 'STYLE':  return '';
         default:       return inline(n, onNavy);   // span, and anything unexpected
@@ -374,7 +401,7 @@ async function extractArticle(page, html) {
       return clone;
     };
 
-    const BLOCK_SEL = 'p, h1, h2, h3, h4, h5, h6, ul, ol, table, dl, pre, blockquote, div, section, aside, figure';
+    const BLOCK_SEL = 'p, h1, h2, h3, h4, h5, h6, ul, ol, table, dl, pre, blockquote, div, section, aside, figure, li, dt, dd';
 
     /* A heading may hold a link or inline code, so the email renders its markup
        rather than its escaped text — but inline() skips block children, so a
@@ -385,11 +412,29 @@ async function extractArticle(page, html) {
     const norm = t => String(t).replace(/\s+/g, ' ').trim();
     const headBlock = (kind, el, onNavy) => {
       const plain = text(el);
-      const html = inline(el, onNavy);
+      let html = inline(el, onNavy);
       probe.innerHTML = html;
+      if (norm(probe.textContent) !== norm(plain)) {
+        /* A heading holding a block child — <h2>See <div><a…>THE RULE</a></div>
+           before filing</h2>. inline() skips blocks, so the markup accounted for
+           only part of the text and the whole heading fell back to escaped plain
+           text, taking the citation with it: the packet kept the link and the
+           email had no href to click at all. flatten() descends. */
+        html = flatten(el, onNavy);
+        probe.innerHTML = html;
+      }
       return { kind, text: plain, html: norm(probe.textContent) === norm(plain) ? html : '' };
     };
     const CONTAINER_CLASS = ['callout', 'action-list', 'sources-box'];
+    /* A container's OWN label, never one belonging to a box nested inside it.
+       A plain querySelector('.label') took the first one anywhere below, so an
+       unlabelled callout wrapping a labelled one was headed with the INNER
+       box's label — an assertion about text it does not describe — and the
+       inner box lost its own. For a sources box it was worse: the parts walk
+       descended into the nested element because it "contained the label", and
+       the nested panel was dismantled into a bare paragraph. */
+    const ownLabel = el => ownedBy(el, '.label',
+      p => CONTAINER_CLASS.some(c => p.classList.contains(c)))[0] || null;
     const OWNED_SEL = 'ul, ol, table, pre, blockquote, dl, figure, .callout, .action-list, .sources-box';
     const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
       CONTAINER_CLASS.some(c => el.classList.contains(c));
@@ -398,6 +443,9 @@ async function extractArticle(page, html) {
       .filter(c => c.tagName === 'TH' || c.tagName === 'TD')
       .map(c => ({
         html: flatten(c, false),
+        // Per cell. A `<th scope="row">` in an otherwise ordinary row is a row
+        // LABEL: bold, like the browser draws it, but not a column heading.
+        header: c.tagName === 'TH',
         // Carried through, or a merged header cell shifts every value in the
         // row one column left and puts a California date under "Form".
         colspan: Math.max(1, parseInt(c.getAttribute('colspan') || '1', 10) || 1),
@@ -407,9 +455,21 @@ async function extractArticle(page, html) {
     const tableBlock = (el) => {
       // Scoped: an unscoped querySelectorAll('tr') hoisted the rows of a nested
       // table out of their cell and made them siblings of the outer table.
-      const trs = [...el.querySelectorAll(':scope > tr, :scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr')];
+      /* thead, then bodies, then tfoot — the order the table RENDERS in, which
+         is not the order it is written in. <tfoot> before <tbody> is HTML 4's
+         required order and still comes out of plenty of generators; taken in
+         document order the email printed "TOTAL 1,250" above the 1,000 and the
+         250 it sums. */
+      const trs = [
+        ...el.querySelectorAll(':scope > thead > tr'),
+        ...el.querySelectorAll(':scope > tr, :scope > tbody > tr'),
+        ...el.querySelectorAll(':scope > tfoot > tr'),
+      ];
       const rows = trs.map(tr => ({
-        header: [...tr.children].some(c => c.tagName === 'TH'),
+        // A row that HOLDS a <th> is not a row OF <th>s. Styling the whole row
+        // as a header made every cell of a `<th scope="row">Form 941</th>` row
+        // bold navy on cream, so the table had no visible body at all.
+        header: [...tr.children].every(c => c.tagName !== 'TD'),
         cells: cellsOf(tr),
       })).filter(r => r.cells.length);
       const capEl = el.querySelector(':scope > caption');
@@ -428,7 +488,15 @@ async function extractArticle(page, html) {
       const list = [];
       let term = '';
       const bold = t => `<strong class="t-strong" style="color:${onNavy ? P.CREAM : P.NAVY_900};font-weight:700;">${t}</strong>`;
-      for (const c of el.children) {
+      /* Direct children ONLY was wrong: HTML5 lets each name-value group sit in
+         its own <div>, which is how anyone grids or flexes a definition list.
+         Every <div> child fell through both branches, the list came out empty,
+         and the whole thing — terms, definitions and the citations inside them
+         — was dropped from the email with no warning while the packet printed
+         it in full. Document order across the groups, and never a nested <dl>'s
+         own terms. */
+      const groups = ownedBy(el, 'dt, dd', p => p !== el && p.tagName === 'DL');
+      for (const c of groups) {
         if (c.tagName === 'DT') {
           if (term) list.push({ html: bold(term), depth: 0 });   // term with no definition
           term = flatten(c, onNavy);
@@ -570,7 +638,13 @@ async function extractArticle(page, html) {
         case 'UL': case 'OL':  return listBlocks(el, onNavy);
         case 'TABLE':          return tableBlock(el);
         case 'DL':             return dlBlock(el, onNavy);
-        case 'PRE':            return text(el) ? [{ kind: 'pre', text: el.textContent.replace(/\s+$/, '') }] : [];
+        // textContent alone dropped every <a> and <strong> a code block held —
+        // a cited URL the reviewer could read but not follow. flatten() keeps
+        // the markup; the text is still carried for the plain-text part.
+        case 'PRE':            return text(el)
+          ? [{ kind: 'pre', text: el.textContent.replace(/\s+$/, ''),
+               html: flatten(el, onNavy).replace(/\s+$/, '') }]
+          : [];
         case 'HR':             return [];
         case 'BLOCKQUOTE': {
           const inner = blocksOf(el, onNavy);
@@ -609,11 +683,8 @@ async function extractArticle(page, html) {
             // The label node itself, wherever it sits — and the SAME node is
             // what gets removed. Reading `:scope > .label` while removing
             // `.label` at any depth deleted a nested label without using it.
-            const label = el.querySelector('.label');
-            const clone = el.cloneNode(true);
-            const labels = [...clone.querySelectorAll('.label')];
-            if (label && labels.length) labels[0].remove();
-            const blocks = blocksOf(clone, onNavy);
+            const label = ownLabel(el);
+            const blocks = blocksOf(label ? withoutNodes(el, [label]) : el, onNavy);
             return blocks.length ? [{ kind: 'callout', label: text(label), blocks }] : [];
           }
           if (cls.contains('action-list') || cls.contains('sources-box')) {
@@ -624,7 +695,7 @@ async function extractArticle(page, html) {
             const lists = ownedBy(el, 'ul, ol',
                                   p => isContainer(p) || p.classList.contains('label'));
             const listSet = new Set(lists);
-            const label = isAction ? null : el.querySelector('.label');
+            const label = isAction ? null : ownLabel(el);
 
             /* An ORDERED stream of the panel's parts, descending through
                wrappers. Treating a wrapper as one unit put prose that
@@ -656,6 +727,7 @@ async function extractArticle(page, html) {
                blocks that interrupt them, rather than one panel plus a pile of
                blocks below it. */
             const panelSeq = [];
+            let panelOrdered = false, panelStart = 1;
             let phase = 0;
             let heading = '';
             const pair = (nav, lite) => ({ nav, lite });
@@ -666,9 +738,14 @@ async function extractArticle(page, html) {
                null means "not in the prose that precedes the citations" — the
                panel keeps it, which is where it already reads correctly. */
             let labelPos = null;
+            let labelAfter = false;
             for (const part of parts) {
               if (part.label) {
-                if (phase === 0) labelPos = before.length;
+                // Before the citations it joins the prose at its own index;
+                // AFTER them it was skipped entirely and the panel printed it
+                // on top, so a box written "<ul>…</ul><span class=label>" read
+                // label-first in the email and label-last in the packet.
+                if (phase === 0) labelPos = before.length; else labelAfter = true;
                 continue;
               }
               if (part.list) {
@@ -678,6 +755,15 @@ async function extractArticle(page, html) {
                 // mis-colours a block rather than dropping it.
                 const navSeq = phase <= 1 ? listBlocks(part.list, isAction, 0) : [];
                 const asItems = navSeq.flatMap(b => (b.kind === 'list' ? b.items : []));
+                // The panel renders a fixed checkmark column and a fixed <ul>,
+                // so an <ol start="3"> inside one printed 3. 4. 5. in the packet
+                // and no numbers at all in the email — "fix step 4" then meant
+                // nothing in one of the two artifacts.
+                const firstList = navSeq.find(b => b.kind === 'list');
+                if (firstList && firstList.ordered) {
+                  panelOrdered = true;
+                  panelStart = Number.isFinite(firstList.start) ? firstList.start : 1;
+                }
                 // An EMPTY <ul> is not the checklist. Letting it advance the
                 // phase demoted the real list below it to plain bullets and
                 // left an empty navy bar where the panel should have been.
@@ -778,23 +864,31 @@ async function extractArticle(page, html) {
             // "Sources" heading above a sources box that never had a label,
             // and an empty one put a blank <h3> above its prose.
             let srcLabel = label ? (text(label) || 'Sources') : '';
-            if (!isAction && leadOut.length && srcLabel) {
+            if (!isAction && srcLabel && labelAfter) {
+              const b = { kind: 'h3', text: srcLabel, html: '' };
+              after.unshift({ nav: b, lite: b });
+              srcLabel = '';
+            } else if (!isAction && leadOut.length && srcLabel) {
               leadOut.splice(Math.min(labelPos ?? 0, leadOut.length), 0,
                              { kind: 'h3', text: srcLabel, html: '' });
               srcLabel = '';
             }
             /* Heading, lead and label belong to the FIRST chunk only — repeating
                them over a split panel would read as two separate checklists. */
-            let first = true;
+            let first = true, numbered = 0;
             const panel = items.length
               ? panelSeq.flatMap((seg) => {
                   if (seg.block) return [seg.block];
                   if (!seg.items.length) return [];
                   const head = first;
                   first = false;
+                  const from = panelOrdered ? panelStart + numbered : undefined;
+                  numbered += seg.items.filter(i => !i.depth && !i.cont).length;
                   return [isAction
-                    ? { kind: 'action', heading: head ? heading : '', lead: head ? lead : [], items: seg.items }
-                    : { kind: 'sources', label: head ? srcLabel : '', items: seg.items }];
+                    ? { kind: 'action', heading: head ? heading : '', lead: head ? lead : [],
+                        items: seg.items, ordered: panelOrdered, start: from }
+                    : { kind: 'sources', label: head ? srcLabel : '',
+                        items: seg.items, ordered: panelOrdered, start: from }];
                 })
               : [
                   ...(isAction && heading ? [{ kind: 'h3', text: heading, html: '' }] : []),
@@ -1197,6 +1291,13 @@ function buildHtml(prs, generatedOn) {
 
   .draft-body { padding:10mm 14mm 4mm; max-width:170mm; }
   .draft-body p { margin-bottom:1.3em; }
+  /* An open <dialog> is position:absolute over an opaque ground in the UA
+     stylesheet. Forcing it open so the packet would SHOW its text instead made
+     it leave the flow and paint over the paragraph beneath — a sentence about a
+     5 percent penalty, obliterated in the PDF and printed in the email. Opened
+     and put back in the flow. */
+  .draft-body dialog { position:static; display:block; background:transparent; color:inherit;
+                       border:0; padding:0; margin:0 0 1.3em; max-width:none; width:auto; }
   .draft-body h2 { font-size:14pt; margin:1.6em 0 .6em; break-after:avoid; }
   .draft-body h3 { font-size:11.5pt; margin:1.4em 0 .5em; break-after:avoid; }
   .draft-body ul, .draft-body ol { margin:0 0 1.3em 1.2em; }
@@ -1229,6 +1330,13 @@ function buildHtml(prs, generatedOn) {
   .draft-body .action-list ul { list-style:none; margin:0; }
   .draft-body .action-list li { position:relative; padding-left:6mm; margin-bottom:2mm; }
   .draft-body .action-list li::before { content:"\\2713"; position:absolute; left:0; top:0; font-family:var(--serif); font-weight:700; color:var(--gold-500); }
+  /* An ORDERED checklist keeps its numbers and drops the checkmark. The reset
+     above was written for unordered lists only, so an ol in a panel printed
+     "1. checkmark step" — two markers for one step — while the email, whose
+     panel renders a fixed checkmark column, printed no number at all. */
+  .draft-body .action-list ol { list-style:decimal; margin:0 0 0 5mm; }
+  .draft-body .action-list ol > li { padding-left:0; }
+  .draft-body .action-list ol > li::before { content:none; }
 
   /* A .callout or .sources-box nested inside the panel is its own white box,
      so everything in it goes back to the body colours. A sources box has no
@@ -1264,6 +1372,21 @@ function buildHtml(prs, generatedOn) {
   .draft-body .sources-box ul { list-style:none; margin:0; }
   .draft-body .sources-box li { margin-bottom:1.5mm; font-size:9pt; word-break:break-word; }
   .draft-body .disclaimer { margin-top:5mm; font-size:8.5pt; font-style:italic; color:var(--grey-500); }
+
+  /* LAST, and they have to be last. The panel's catch-all is two classes and a
+     universal selector — specificity (0,2,0) — which TIES with the disclaimer
+     rule, and the sources-box label rule is higher still, so whichever is
+     written later wins. Written earlier, the panel lost: a disclaimer inside an
+     action list rendered grey #5C6577 on navy at 2.43:1, and a label on a
+     panel carrying both container classes rendered gold-on-navy at 2.42:1 —
+     both ghosts in the PDF, both perfectly legible in the email. Anything
+     nested in a white box inside the panel goes back to dark type after them. */
+  .draft-body .action-list .disclaimer { color:rgba(245,240,232,.75); }
+  .draft-body .action-list .label { color:var(--gold-300); }
+  .draft-body .action-list .callout .disclaimer,
+  .draft-body .action-list .sources-box .disclaimer { color:var(--grey-500); }
+  .draft-body .action-list .callout .label { color:var(--gold-text); }
+  .draft-body .action-list .sources-box .label { color:var(--grey-500); }
 
   /* ---------- reviewer notes: same language, unmistakably not the article ---------- */
   .notes {
@@ -1512,6 +1635,16 @@ async function main() {
        run-wide "did anything render" flag locked out a draft whose own article
        failed whenever a sibling's succeeded — recorded as reviewed, delivered
        as a bare link, shut out until the following Monday. */
+    /* How many drafts each pull request contributed, rendered or not. The
+       subject line is written from this rather than from the number of pull
+       requests: one pull request carrying two articles used to be "2 Ledger
+       drafts ready for review" in the subject and "3 drafts ready for review"
+       in the body of the same message, both saying "drafts". */
+    if (process.env.COUNTS_OUT) {
+      await fs.writeFile(process.env.COUNTS_OUT, JSON.stringify(Object.fromEntries(
+        rendered.map(pr => [String(pr.number), pr.articles.length + (pr.skipped || []).length]))));
+    }
+
     if (process.env.CARRIED_OUT) {
       /* Which pull requests the reviewer has actually been given this week.
          "Given" means in the body OR in the attached PDF, which carries every
@@ -1528,9 +1661,21 @@ async function main() {
            a thing to re-mail; the email names it and the Actions log warns. */
       const key = (pr, a) => `${pr.number}:${a.path}`;
       const carried = rendered
-        .filter(pr => pr.articles.length
-                   && ((packetOk && !emptyPrs.has(String(pr.number)))
-                       || pr.articles.every(a => printedPaths.has(key(pr, a)))))
+        .filter(pr => (pr.articles.length
+          ? ((packetOk && !emptyPrs.has(String(pr.number)))
+             || pr.articles.every(a => printedPaths.has(key(pr, a))))
+          /* Nothing rendered from this pull request. `[].every()` is true, so
+             this branch has to be spelled out or a run in which EVERY article
+             failed would record every pull request as delivered.
+
+             No article files at all is not a failure: a [Ledger] pull request
+             that touched only automation has nothing to render and nothing was
+             lost, and the email still names it and links it. Left out of the
+             record it was re-sent by both of the week's triggers, every week,
+             for as long as it stayed open — the duplicate this whole rework
+             exists to remove. Article files that failed to render ARE a loss,
+             so those stay out and the Monday floor tries again. */
+          : !(pr.skipped || []).length))
         .map(pr => String(pr.number));
       await fs.writeFile(process.env.CARRIED_OUT, JSON.stringify(carried));
       console.log(`Delivered this week: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);

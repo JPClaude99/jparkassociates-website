@@ -119,9 +119,16 @@ concurrency:
 
 jobs:
   ledger-draft-review:
-    # A cancelled or skipped scan drafted nothing and decided nothing; there is
-    # no news to report. A FAILED scan still runs — it may well have opened the
-    # pull request before dying, and the lock stops the retry mailing twice.
+    # A SKIPPED scan never started, so there is nothing to report. A CANCELLED
+    # one is different — the agent opens its pull request partway through the
+    # run and keeps working afterwards, so an operator who cancels a thrashing
+    # scan may well be cancelling it after the draft exists. Not emailing then
+    # is the deliberate choice: a cancelled run is one nobody trusts the output
+    # of, and Monday's 20:00 floor picks the draft up on its own. A midweek
+    # cancellation therefore waits for the next Monday, which is the cadence
+    # this workflow promises anyway.
+    # A FAILED scan still runs — it may well have opened the pull request
+    # before dying, and the lock stops the retry mailing twice.
     if: >
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion != 'cancelled' &&
@@ -129,9 +136,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # The lock is a branch-scoped Actions cache. A dispatch from another ref
-      # would read an empty record and write one the scheduled runs never see,
-      # so it would mail a second copy of the same review. Refuse instead.
+      # The lock is an Actions cache, and cache SCOPING is asymmetric: a run on
+      # a topic branch can READ caches saved on the default branch, but anything
+      # it saves is scoped to the topic branch and is invisible to the scheduled
+      # runs on the default branch. So a dispatch from another ref would see the
+      # record, correctly send nothing new — and then, if it did send, write a
+      # record no later run can read, and the floor would mail a second copy.
+      # Refuse instead: run it from the default branch, where both halves work.
       - name: This week, on the right branch
         id: week
         env:
@@ -284,6 +295,7 @@ jobs:
           DOCX_PATH: ${{ runner.temp }}/Ledger-review-notes.docx
           EMAIL_HTML_OUT: ${{ runner.temp }}/email.html
           CARRIED_OUT: ${{ runner.temp }}/carried.json
+          COUNTS_OUT: ${{ runner.temp }}/counts.json
         run: node automation/ledger-draft-pdf.mjs
 
       # Decide from what is actually on disk, not from either build's exit code —
@@ -291,6 +303,8 @@ jobs:
       - name: Decide what the email can carry
         id: mail
         if: steps.gate.outputs.go == 'yes'
+        env:
+          FIND_COUNT: ${{ steps.find.outputs.count }}
         run: |
           html='${{ runner.temp }}/email.html'
           pdf='${{ runner.temp }}/ledger-drafts.pdf'
@@ -326,6 +340,21 @@ jobs:
             cov='The full text of each draft is in the HTML version of this email.'
           fi
           echo "coverage=$cov" >> "$GITHUB_OUTPUT"
+          # THE SUBJECT COUNTS DRAFTS, like the body does. It was computed from
+          # the number of pull requests before any of them had been opened, so
+          # one pull request carrying two articles arrived as "1 Ledger draft"
+          # over a body reading "2 drafts ready for review". Integers only —
+          # nothing from a pull request title reaches this line. The single-draft
+          # subject still names the article, so it is left to the step that has
+          # the title; anything else is written here.
+          total=$((arts + skip))
+          if [ "$total" -ge 1 ] && ! { [ "$total" = "1" ] && [ "$FIND_COUNT" = "1" ]; }; then
+            if [ "$total" = "1" ]; then
+              echo "subject=Ready for review: 1 Ledger draft" >> "$GITHUB_OUTPUT"
+            else
+              echo "subject=$total Ledger drafts ready for review" >> "$GITHUB_OUTPUT"
+            fi
+          fi
           echo "pdf=$([ -s "$pdf" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
           echo "docx=$([ -s "$docx" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
           [ -s "$html" ] || echo "::warning::No branded HTML body this run — the drafts could not be rendered. Falling back to plain text."
@@ -368,6 +397,12 @@ jobs:
             // awaiting review. The correction goes in as a banner at the top of
             // the reader's own view — see automation/ledger-email-notice.mjs.
             core.setOutput('open', live.length ? 'yes' : 'no');
+            /* Exactly the drafts this email is about. The Monday floor records
+               these rather than the ones whose text rendered — see the note on
+               the record step. Written here, not in `find`, so a draft merged
+               or closed in the render window is not recorded as reviewed. */
+            fs.writeFileSync('${{ runner.temp }}/emailed.json',
+                             JSON.stringify(live.map(s => String(s.number))));
 
             const parts = [];
             if (merged.length) {
@@ -381,9 +416,20 @@ jobs:
               // The subject line is the other thing the reader sees before
               // opening, and it was computed before any of this. A banner
               // inside the body cannot reach it, so recompute it here.
-              core.setOutput('subject', live.length === 1
-                ? `Ready for review: 1 Ledger draft`
-                : `${live.length} Ledger drafts ready for review`);
+              // Drafts, not pull requests — the same count the body prints.
+              // Missing or unreadable counts fall back to one draft per pull
+              // request, which is the shape of every run the scanner produces.
+              let counts = {};
+              try { counts = JSON.parse(fs.readFileSync('${{ runner.temp }}/counts.json', 'utf8')); }
+              catch { /* the builder did not get that far */ }
+              const nDrafts = live.reduce((n, s) => n + (counts[String(s.number)] ?? 1), 0);
+              const only = nDrafts === 1 && live.length === 1
+                ? drafts.find(d => d.number === live[0].number) : null;
+              core.setOutput('subject', only
+                ? `Ready for review: ${only.title.replace(/^\[Ledger\]\s*/, '')}`
+                : nDrafts === 1
+                  ? 'Ready for review: 1 Ledger draft'
+                  : `${nDrafts} Ledger drafts ready for review`);
               core.setOutput('note',
                 `${parts.join('; ')} while this email was being prepared. The count above, the ` +
                 `attachments and the article text below were all built moments earlier, so ignore ` +
@@ -413,7 +459,10 @@ jobs:
           smtp_user: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
           smtp_pass: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
           # The recheck's subject wins when a draft merged or closed mid-build.
-          subject: ${{ steps.recheck.outputs.subject || steps.find.outputs.subject }}
+          # Most specific first: recheck knows what survived the render window,
+          # mail knows how many drafts the run actually found, find only ever
+          # knew how many pull requests there were.
+          subject: ${{ steps.recheck.outputs.subject || steps.mail.outputs.subject || steps.find.outputs.subject }}
           html_file: ${{ steps.mail.outputs.html }}
           attachments: ${{ steps.mail.outputs.attachments }}
           # Plain-text alternative, always sent alongside the HTML part. This is
@@ -457,13 +506,29 @@ jobs:
       # as a bare link, and shut out for the rest of the week. The builder
       # writes the list of pull requests whose text actually reached the inbox,
       # and only those are recorded.
+      # THE FLOOR CONCLUDES THE WEEK. Leaving a draft out of the record is a
+      # request to try again, and after the 20:00 Monday cron there is nothing
+      # left in the week to try — so on that run every draft the email named is
+      # recorded, whether or not its text rendered. Without this, a draft that
+      # cannot be rendered (a malformed blog/*.html, which is deterministic)
+      # was mailed by BOTH of Monday's triggers, every Monday, for as long as
+      # the pull request stayed open: two identical emails a week, forever.
+      # The 15:45 fast path still records only what it delivered, so a
+      # transient failure there is still retried at 20:00. Two on a bad
+      # Monday, one on a good one, never three.
       - name: Record what went out
         id: record
         if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
         continue-on-error: true       # the email is already away; a lost record costs a duplicate
+        env:
+          FLOOR: ${{ github.event_name == 'schedule' }}
         run: |
           prev='${{ runner.temp }}/prev.json'
           carried='${{ runner.temp }}/carried.json'
+          # On the floor, the drafts this email named stand in for the ones it
+          # carried. A manual dispatch is a deliberate re-send and is treated
+          # like the fast path: conservative, records only what it delivered.
+          if [ "$FLOOR" = "true" ]; then carried='${{ runner.temp }}/emailed.json'; fi
           if [ ! -s "$carried" ] || [ "$(cat "$carried")" = "[]" ]; then
             echo "::warning::No draft's text reached this email, so the week is NOT marked done; the next run will try again."
             echo "keep=no" >> "$GITHUB_OUTPUT"
