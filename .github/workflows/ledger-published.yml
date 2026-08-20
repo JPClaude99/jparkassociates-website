@@ -16,6 +16,13 @@ name: Ledger published
 # automation publishes nothing and sends nothing — that is a clean no-op, not a
 # failure.
 #
+# But a PR that adds blog/<slug>.html WITHOUT adding it to blog/posts.js is not
+# a no-op: the article is live on the site and missing from the index, so no
+# reader will ever reach it. That case FAILS the run on purpose. GitHub then
+# emails the repo admin about the failed run, which is the only thing that
+# turns a silently-orphaned article into something anyone finds out about.
+# Fix the manifest, then re-send the notice with the workflow_dispatch below.
+#
 # Uses the same two secrets as the weekly review; see that file's header for the
 # App Password setup and its gotchas.
 
@@ -31,6 +38,16 @@ on:
 permissions:
   contents: read
   pull-requests: read
+
+# Per pull request, and queued rather than cancelled — the send is the last
+# step, so cancelling a run mid-flight could kill a notice that was already
+# half out the door. A merge fires `closed` exactly once, so the automatic path
+# cannot collide with itself; this exists for the manual re-send, which is
+# deliberately unbounded (that is the point of a re-send) but must not run twice
+# at the same moment for the same pull request.
+concurrency:
+  group: ledger-published-${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   notify:
@@ -68,8 +85,13 @@ jobs:
           node automation/ledger-published-email.mjs
           if [ -s "${{ runner.temp }}/published.html" ]; then
             echo "send=yes" >> "$GITHUB_OUTPUT"
-            { echo "subject<<EOF"; cat "${{ runner.temp }}/subject.txt"; echo; echo "EOF"; } >> "$GITHUB_OUTPUT"
-            { echo "text<<EOF";    cat "${{ runner.temp }}/published.txt"; echo; echo "EOF"; } >> "$GITHUB_OUTPUT"
+            # A fixed "EOF" delimiter is a corrupt $GITHUB_OUTPUT waiting for the
+            # day an article body contains that line. Use one nothing can guess.
+            d="EOF_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+            # Subjects are one line by construction; make that true by force
+            # rather than by assumption — a newline here would break the header.
+            echo "subject=$(tr '\n' ' ' < "${{ runner.temp }}/subject.txt" | sed 's/ *$//')" >> "$GITHUB_OUTPUT"
+            { echo "text<<$d"; cat "${{ runner.temp }}/published.txt"; echo; echo "$d"; } >> "$GITHUB_OUTPUT"
           else
             echo "send=no" >> "$GITHUB_OUTPUT"
             echo "::notice::No articles published by this pull request; no email sent."

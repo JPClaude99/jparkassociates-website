@@ -74,8 +74,21 @@ async function main() {
   const published = posts.filter(p => wanted.has(p.slug));
 
   if (!published.length) {
-    console.log(`PR #${prNumber} published no articles found in the manifest — no email.`);
-    return;             // exit 0: a Ledger PR can legitimately touch only automation
+    // Two very different situations, and conflating them hid a real defect.
+    if (!slugs.length) {
+      // Clean no-op: a Ledger PR may legitimately touch only automation.
+      console.log(`PR #${prNumber} added no article files — nothing published, no email.`);
+      return;
+    }
+    // An article file shipped to the site but is not in blog/posts.js, so it is
+    // live and unreachable — absent from the blog index and from this email.
+    // Failing is the alarm: GitHub mails the repo admin about a failed run,
+    // which is the only way anyone finds out.
+    throw new Error(
+      `PR #${prNumber} added ${slugs.map(s => `blog/${s}.html`).join(', ')} but ` +
+      'none of those slugs are in blog/posts.js. The article(s) are live on the site and ' +
+      'missing from the blog index. Add the manifest entry, then re-send this notice with ' +
+      'the "Ledger published" workflow_dispatch.');
   }
 
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -109,7 +122,7 @@ async function main() {
       href: 'https://jparkassociates.com/blog.html',
       label: 'Read The Ledger',
       lead: 'Everything from this month, in one place.',
-      caption: 'The next announcement scan runs Monday at 8 AM Pacific.',
+      caption: 'The next announcement scan runs Monday morning.',
     },
     footNote: `Internal automation &mdash; sent once, when a Ledger pull request merges.
       Sources and confidence notes stay in
