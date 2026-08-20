@@ -52,11 +52,21 @@ def strip_expressions(script):
             out.append(script[i:])
             break
         out.append(script[i:start])
-        depth, j = 0, start + 1          # start at the first '{' of '${{'
+        # Braces inside a string literal are not structure. `hashFiles('src/{a')`
+        # left the counter one deep, so the scan ran past the expression and
+        # stopped at the next unmatched `}` in the SHELL — swallowing a whole
+        # broken region and reporting ALL OK on a script bash rejects.
+        depth, j, quote = 0, start + 1, None   # start at the first '{' of '${{'
         while j < len(script):
-            if script[j] == '{':
+            ch = script[j]
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in ("'", '"'):
+                quote = ch
+            elif ch == '{':
                 depth += 1
-            elif script[j] == '}':
+            elif ch == '}':
                 depth -= 1
                 if depth == 0:
                     break
@@ -112,7 +122,7 @@ def main():
             continue
         for where, step, shell in steps_of(doc):
             script = step.get('run')
-            if not script:
+            if script is None or script == '':
                 continue
             if not isinstance(script, str):
                 bad += 1

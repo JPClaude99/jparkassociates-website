@@ -140,15 +140,17 @@ async function extractArticle(page, html) {
     }
     /* Attributes, not just elements. A single inline style can cover the whole
        packet — `position:fixed;width:100%;height:100%;background:#fff` renders
-       every page blank — and `display:none` makes the packet and the email
-       disagree about what the article even says. Event handlers are inert with
+       every page blank — and `display:none`, or the `hidden` attribute that
+       means the same thing, makes the packet and the email disagree about what
+       the article even says. Event handlers are inert with
        scripting disabled, but they are stripped so the packet's HTML cannot
        carry one into any future renderer. data-ledger-* is ours: an article
        that spoofs it could delete its own content from the email. */
     for (const el of body.querySelectorAll('*')) {
       for (const attr of [...el.attributes]) {
         const n = attr.name.toLowerCase();
-        if (n.startsWith('on') || n === 'style' || n.startsWith('data-ledger-')) el.removeAttribute(attr.name);
+        if (n.startsWith('on') || n === 'style' || n === 'hidden' || n === 'aria-hidden' ||
+            n.startsWith('data-ledger-')) el.removeAttribute(attr.name);
       }
     }
 
@@ -262,12 +264,21 @@ async function extractArticle(page, html) {
       // Replaced with a space, not removed. Deleting the node left the text on
       // either side of it adjacent, so "<li>LEAD<table/>TAIL</li>" flattened to
       // the single word "LEADTAIL".
-      clone.querySelectorAll(`[${MARK}]`)
-        .forEach(n => n.replaceWith(n.ownerDocument.createTextNode(' ')));
+      // A space only where the text on either side does not already have one.
+      // Removing outright glued "LEAD<table/>TAIL" into one word; replacing
+      // unconditionally split "va<pre/>lue" into two.
+      clone.querySelectorAll(`[${MARK}]`).forEach(n => {
+        const before = n.previousSibling, after = n.nextSibling;
+        const endsWs = before && /\s$/.test(before.textContent || '');
+        const startsWs = after && /^\s/.test(after.textContent || '');
+        const needs = before && after && !endsWs && !startsWs;
+        n.replaceWith(n.ownerDocument.createTextNode(needs ? ' ' : ''));
+      });
       nodes.forEach(n => n.removeAttribute(MARK));
       return clone;
     };
 
+    const BLOCK_SEL = 'p, h1, h2, h3, h4, h5, h6, ul, ol, table, dl, pre, blockquote, div, section, aside, figure';
     const CONTAINER_CLASS = ['callout', 'action-list', 'sources-box'];
     const OWNED_SEL = 'ul, ol, table, pre, blockquote, dl, figure, .callout, .action-list, .sources-box';
     const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
@@ -294,7 +305,7 @@ async function extractArticle(page, html) {
       const capEl = el.querySelector(':scope > caption');
       const cap = text(capEl);
       const out = [];
-      if (cap) out.push({ kind: 'h3', text: cap });
+      if (cap) out.push({ kind: 'h3', text: cap, html: inline(capEl, false) });
       if (rows.length) { out.push({ kind: 'table', rows }); return out; }
       // No rows is not no content — but the caption is already out, so the
       // fallback must not print it a second time.
@@ -372,9 +383,9 @@ async function extractArticle(page, html) {
                 ? { kind: 'disclaimer', html: inline(el, onNavy) }
                 : { kind: 'p', html: inline(el, onNavy) }]
             : [];
-        case 'H1': case 'H2': return [{ kind: 'h2', text: text(el) }];
+        case 'H1': case 'H2': return [{ kind: 'h2', text: text(el), html: inline(el, onNavy) }];
         case 'H3': case 'H4':
-        case 'H5': case 'H6': return [{ kind: 'h3', text: text(el) }];
+        case 'H5': case 'H6': return [{ kind: 'h3', text: text(el), html: inline(el, onNavy) }];
         case 'UL': case 'OL':  return listBlocks(el, onNavy);
         case 'TABLE':          return tableBlock(el);
         case 'DL':             return dlBlock(el, onNavy);
@@ -409,88 +420,97 @@ async function extractArticle(page, html) {
             const isAction = cls.contains('action-list');
             /* Lists belonging to a NESTED callout or sources box are that box's,
                not this panel's. Adopting them printed a source URL as an action
-               step with a checkmark and left the nested box rendering as an
-               empty navy bar. */
+               step with a checkmark and left the nested box as an empty bar. */
             const lists = ownedBy(el, 'ul, ol',
                                   p => isContainer(p) || p.classList.contains('label'));
             const listSet = new Set(lists);
             const label = isAction ? null : el.querySelector('.label');
 
-            /* Walk the children IN ORDER and split at the first list. Collecting
-               every paragraph into `lead` regardless of where it sat printed
-               trailing prose above the checklist, and a table that introduced
-               the steps below them. */
+            /* An ORDERED stream of the panel's parts, descending through
+               wrappers. Treating a wrapper as one unit put prose that
+               introduced the steps below them, because the wrapper "contained a
+               list" before its own first paragraph had been looked at. */
+            const parts = [];
+            const walk = (node) => {
+              for (const n of node.childNodes) {
+                if (n.nodeType === 3) {
+                  const t = n.nodeValue.trim();
+                  if (t) parts.push({ text: t });
+                  continue;
+                }
+                if (n.nodeType !== 1) continue;
+                if (listSet.has(n)) { parts.push({ list: n }); continue; }
+                if (label && n === label) { parts.push({ label: true }); continue; }
+                if (lists.some(l => n.contains(l)) || (label && n.contains(label))) { walk(n); continue; }
+                parts.push({ el: n });
+              }
+            };
+            walk(el);
+
+            /* Three phases: before the checklist, the checklist itself, after
+               it. Prose between two lists ENDS the panel — the second list then
+               renders as an ordinary list in document order, rather than being
+               merged into the panel above the paragraph that introduced it. */
             const before = [], after = [], items = [];
-            let seenList = false;
-            let heading = '';
-            const sink = () => (seenList ? after : before);
-            for (const node of el.childNodes) {
-              if (node.nodeType === 3) {
-                const t = node.nodeValue.trim();
-                if (t) sink().push({ kind: 'p', html: escHtml(t) });
-                continue;
-              }
-              if (node.nodeType !== 1) continue;
-              const mine = lists.filter(l => l === node || node.contains(l));
-              if (mine.length) {
-                for (const l of mine) {
-                  for (const b of listBlocks(l, isAction, 0)) {
+            let phase = 0, heading = '';
+            const pair = (nav, lite) => ({ nav, lite });
+            for (const part of parts) {
+              if (part.label) continue;
+              if (part.list) {
+                if (phase <= 1) {
+                  phase = 1;
+                  for (const b of listBlocks(part.list, isAction, 0)) {
                     if (b.kind === 'list') items.push(...b.items);
-                    else after.push(b);
                   }
-                }
-                seenList = true;
-                // A wrapper around the list may carry prose of its own.
-                if (!listSet.has(node)) {
-                  for (const b of blocksOf(withoutNodes(node, mine), isAction)) sink().push(b);
+                  // Heavy blocks inside those items leave the panel, so they are
+                  // computed for the light ground rather than recoloured after.
+                  for (const b of listBlocks(part.list, false, 0)) {
+                    if (b.kind !== 'list') after.push(pair(b, b));
+                  }
+                } else {
+                  for (const b of listBlocks(part.list, false, 0)) after.push(pair(b, b));
                 }
                 continue;
               }
-              if (label && (node === label || node.contains(label))) {
-                if (node !== label) for (const b of blocksOf(withoutNodes(node, [label]), false)) sink().push(b);
+              if (phase === 1) phase = 2;
+              const sink = phase === 0 ? before : after;
+              if (part.text) {
+                const b = { kind: 'p', html: escHtml(part.text) };
+                sink.push(pair(b, b));
                 continue;
               }
-              if (isAction && !heading && /^H[1-6]$/.test(node.tagName)) { heading = text(node); continue; }
-              for (const b of blocksOfNode(node, isAction)) sink().push(b);
+              if (isAction && !heading && /^H[1-6]$/.test(part.el.tagName)) {
+                heading = text(part.el);
+                continue;
+              }
+              /* Computed on BOTH grounds, and the right one is picked by where
+                 the block ends up. Recolouring afterwards by string-replacing
+                 palette values rewrote an article that legitimately printed a
+                 hex code, and flipped a nested navy panel to navy-on-navy. */
+              const nav = blocksOfNode(part.el, isAction);
+              const lite = blocksOfNode(part.el, false);
+              nav.forEach((b, i) => sink.push(pair(b, lite[i] || b)));
             }
 
-            /* Prose stays on the panel's ground; anything else leaves it. A
-               callout computed for navy and then rendered on cream put #F5F0E8
-               text on an #F5F0E8 background — the inverse of the bug the onNavy
-               flag exists to prevent — so what leaves is recomputed for light. */
-            // Only the action panel has a `lead` slot. Folding a sources box's
-            // prose into one dropped it: the panel renders label and citations
-            // and nothing else. For that panel everything stays a real block.
+            // Only the action panel has a `lead` slot; folding a sources box's
+            // prose into one dropped it, because that panel renders label and
+            // citations and nothing else.
             const lead = [], leadOut = [];
-            for (const b of before) {
-              if (!isAction) leadOut.push(b);
-              else if (b.kind === 'p' || b.kind === 'disclaimer') lead.push(b.html);
-              else if (b.kind === 'h2' || b.kind === 'h3') lead.push(`<strong>${escHtml(b.text)}</strong>`);
-              else leadOut.push(b);
+            for (const { nav, lite } of before) {
+              if (!isAction) leadOut.push(lite);
+              else if (nav.kind === 'p' || nav.kind === 'disclaimer') lead.push(nav.html);
+              else if (nav.kind === 'h2' || nav.kind === 'h3') lead.push(`<strong>${nav.html || escHtml(nav.text)}</strong>`);
+              else leadOut.push(lite);
             }
-            const relight = bs => (isAction ? bs.map(b => relightBlock(b)) : bs);
             const panel = isAction
               ? { kind: 'action', heading, lead, items }
               : { kind: 'sources', label: text(label) || 'Sources', items };
-            return [...relight(leadOut), panel, ...relight(after)];
+            return [...leadOut, panel, ...after.map(x => x.lite)];
           }
           if ([...el.children].some(c => BLOCK.has(c.tagName))) return blocksOf(el, onNavy);
           return text(el) ? [{ kind: 'p', html: inline(el, onNavy) }] : [];
         }
       }
-    };
-
-    /** Re-colour a block that was computed for navy but is leaving the panel. */
-    const relightBlock = (b) => {
-      const swap = h => String(h)
-        .split(P.GOLD_PILL).join(P.NAVY_900)
-        .split(`color:${P.CREAM}`).join(`color:${P.NAVY_900}`);
-      const out = { ...b };
-      if (out.html) out.html = swap(out.html);
-      if (out.items) out.items = out.items.map(i => (typeof i === 'string' ? swap(i) : { ...i, html: swap(i.html) }));
-      if (out.blocks) out.blocks = out.blocks.map(relightBlock);
-      if (out.rows) out.rows = out.rows.map(r => ({ ...r, cells: r.cells.map(c => ({ ...c, html: swap(c.html) })) }));
-      return out;
     };
 
     const blocksOf = (root, onNavy = false) => {
@@ -505,7 +525,19 @@ async function extractArticle(page, html) {
       for (const node of root.childNodes) {
         if (node.nodeType === 3) { buf += escHtml(node.nodeValue); continue; }
         if (node.nodeType !== 1) continue;
-        if (!BLOCK.has(node.tagName)) { buf += inlineNode(node, onNavy); continue; }
+        if (!BLOCK.has(node.tagName)) {
+          // <noscript>, <details>, a custom element — not block-level, but it
+          // can still WRAP blocks, and inlineNode() returns '' for those. The
+          // packet rendered them; the email dropped them silently. <noscript>
+          // in particular is live markup now that page scripting is disabled.
+          if (node.querySelector && node.querySelector(BLOCK_SEL)) {
+            flush();
+            out.push(...blocksOf(node, onNavy));
+          } else {
+            buf += inlineNode(node, onNavy);
+          }
+          continue;
+        }
         flush();
         out.push(...blocksOfNode(node, onNavy));
       }
@@ -1021,10 +1053,15 @@ async function main() {
     // document, then give the fonts a bounded moment to settle — a packet in
     // fallback faces beats no packet at all.
     await page.setContent(html, { waitUntil: 'load', timeout: 60_000 });
-    await page.evaluate(() => Promise.race([
-      document.fonts.ready,
+    /* The bound has to live in NODE, not in the page. With page scripting
+       disabled the page's own setTimeout never fires, so the old in-page race
+       had nothing racing: when document.fonts.ready did not settle it blocked
+       until Puppeteer's 180-second protocol timeout. A packet in fallback faces
+       beats a three-minute stall. */
+    await Promise.race([
+      page.evaluate(() => document.fonts.ready).catch(() => {}),
       new Promise(resolve => setTimeout(resolve, 5000)),
-    ])).catch(() => {});
+    ]);
     // C.GREY. The old #8A93A6 measured 3.09:1 on white, on every page.
   const foot = 'font-family:Inter,Arial,sans-serif;font-size:7.5pt;color:#5C6577;width:100%;padding:0 14mm;';
     // Render to a temporary name and move it into place only on success. A
@@ -1055,15 +1092,28 @@ async function main() {
        laid out as it will read on the site", and — because the PDF counts as
        delivery — took the week's lock so nothing retried. */
     const expected = rendered.reduce((n, pr) => n + pr.articles.length, 0);
-    const shown = await page.evaluate(() => ({
-      drafts: document.querySelectorAll('article.draft').length,
-      chars: (document.body.innerText || '').trim().length,
-    }));
-    packetOk = shown.drafts === expected && shown.chars > 500;
+    const shown = await page.evaluate(() => {
+      // `body > article.draft`, not every match in the document: the article's
+      // own HTML is injected raw into .draft-body, so an article that itself
+      // contained <article class="draft"> inflated the count, failed the check
+      // forever, and had the same email re-sent every week.
+      const drafts = [...document.querySelectorAll('body > article.draft')];
+      return {
+        drafts: drafts.length,
+        // The DRAFT BODIES. Measuring document text let the cover and the notes
+        // panel clear the floor on their own, so an article rendered completely
+        // blank still counted as delivered.
+        empty: drafts.filter(d => {
+          const b = d.querySelector('.draft-body');
+          return !b || (b.innerText || '').trim().length < 120;
+        }).length,
+      };
+    });
+    packetOk = shown.drafts === expected && shown.empty === 0;
     if (!packetOk) {
-      console.log(`::warning::The packet rendered ${shown.drafts} of ${expected} drafts and ` +
-                  `${shown.chars} characters. It is still attached, but it is NOT counted as ` +
-                  'delivery, so the next run will rebuild and send again.');
+      console.log(`::warning::The packet rendered ${shown.drafts} of ${expected} drafts` +
+                  `${shown.empty ? `, ${shown.empty} of them empty` : ''}. It is still attached, ` +
+                  'but it is NOT counted as delivery, so the next run will rebuild and send again.');
     }
 
     const printedPaths = new Set(await writeEmail(rendered, true));

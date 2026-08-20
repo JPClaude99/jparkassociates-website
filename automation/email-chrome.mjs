@@ -284,10 +284,12 @@ export function articleBlocksHtml(blocks) {
     switch (b.kind) {
       case 'p':
         return `<p class="t-body" style="margin:0 0 15px;font:${BODY_FONT};color:${C.SLATE};">${b.html}</p>`;
+      // `html` when the extractor captured one: a heading may hold a link or
+      // inline code, and escaping its plain text threw both away.
       case 'h2':
-        return `<h2 class="t-title" style="margin:26px 0 10px;font:700 19px/1.3 ${SERIF};color:${C.NAVY_900};">${esc(b.text)}</h2>`;
+        return `<h2 class="t-title" style="margin:26px 0 10px;font:700 19px/1.3 ${SERIF};color:${C.NAVY_900};">${b.html || esc(b.text)}</h2>`;
       case 'h3':
-        return `<h3 class="t-title" style="margin:22px 0 8px;font:700 16px/1.35 ${SERIF};color:${C.NAVY_900};">${esc(b.text)}</h3>`;
+        return `<h3 class="t-title" style="margin:22px 0 8px;font:700 16px/1.35 ${SERIF};color:${C.NAVY_900};">${b.html || esc(b.text)}</h3>`;
       case 'list':
         return listHtml(b.items, b.ordered);
       case 'table':
