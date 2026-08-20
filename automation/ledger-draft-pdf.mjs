@@ -135,9 +135,21 @@ async function extractArticle(page, html) {
        artifacts disagreeing completely with nothing to flag it.
        Articles are generated from blog/_template.html and never legitimately
        carry any of these. */
-    for (const el of body.querySelectorAll('style, script, link, meta, base, iframe, object, embed, title')) {
+    for (const el of body.querySelectorAll(
+      'style, script, link, meta, base, iframe, object, embed, title, ' +
+      // Images go too, not just their attributes. Neither artifact renders one
+      // — the email never has, and the packet's own header says so — but the
+      // packet render used to WAIT for them, so a single <img> pointing at a
+      // host that accepts the connection and never answers timed the render
+      // out, produced no PDF, and shipped the article-free first-pass body.
+      // Deterministic, so it repeated every Monday. No <img>, nothing to wait
+      // for. <figcaption> is unaffected and still kept.
+      'img, picture, source, video, audio, canvas, svg, map, area')) {
       el.remove();
     }
+    // <details> renders collapsed, so its body is absent from innerText and the
+    // packet check read the draft as nearly empty. Open it instead.
+    for (const el of body.querySelectorAll('details')) el.setAttribute('open', '');
     /* Attributes, not just elements. A single inline style can cover the whole
        packet — `position:fixed;width:100%;height:100%;background:#fff` renders
        every page blank — and `display:none`, or the `hidden` attribute that
@@ -153,11 +165,26 @@ async function extractArticle(page, html) {
        delivered with no warning. `bgcolor` is the same trick. Rather than keep
        guessing which attribute paints next, keep only the ones this pipeline
        actually reads and drop everything else. */
-    const KEEP_ATTR = new Set(['href', 'src', 'alt', 'colspan', 'rowspan', 'class',
-                               'datetime', 'lang', 'dir', 'scope', 'headers', 'rel', 'start']);
+    const KEEP_ATTR = new Set(['href', 'colspan', 'rowspan', 'class', 'datetime',
+                               'lang', 'dir', 'scope', 'rel', 'start', 'open']);
+    /* `class` needs an allowlist of its own. Keeping it wholesale handed the
+       article the packet's own stylesheet: `<p class="cover-date">` paints
+       cream at 55% opacity, which on the white draft ground measures 1.07:1 —
+       an entire page blank to a human, counted as delivered, email unaffected.
+       Exactly the <font color="#FFFFFF"> outcome, through a different door.
+       `<aside class="notes notes-article">` was worse: article copy rendered
+       identically to the reviewer-notes panel, defeating the one signal that
+       says "not for publication". Only the classes the walker itself reads
+       survive; the packet's chrome is not the article's to borrow. */
+    const KEEP_CLASS = new Set(['callout', 'action-list', 'sources-box', 'label', 'disclaimer']);
     for (const el of body.querySelectorAll('*')) {
       for (const attr of [...el.attributes]) {
         if (!KEEP_ATTR.has(attr.name.toLowerCase())) el.removeAttribute(attr.name);
+      }
+      if (el.classList.length) {
+        const keep = [...el.classList].filter(c => KEEP_CLASS.has(c));
+        if (keep.length) el.setAttribute('class', keep.join(' '));
+        else el.removeAttribute('class');
       }
     }
 
@@ -233,6 +260,16 @@ async function extractArticle(page, html) {
       }
     };
 
+    /* An <a> may legally wrap block content — a card link. Descending into it
+       recovered the text and dropped the href, which is only half a fix: the
+       reviewer saw the words and lost the citation. Re-wrap instead. */
+    const anchorWrap = (a, inner, onNavy) => {
+      const href = escHtml(a.getAttribute('href') || '');
+      if (!href) return inner;
+      const link = onNavy ? P.GOLD_PILL : P.NAVY_900;
+      return `<a class="t-link" href="${href}" style="color:${link};text-decoration:underline;">${inner}</a>`;
+    };
+
     /** A node's children, inline only. Block children are skipped, not walked. */
     const inline = (node, onNavy) => {
       let out = '';
@@ -253,7 +290,9 @@ async function extractArticle(page, html) {
         // the BLOCK list. <span><p>…</p></span> and a table nested three deep
         // inside a cell both went through inlineNode(), which returns '' for a
         // block — present in the packet, gone from the email.
-        if (BLOCK.has(n.tagName) || (n.querySelector && n.querySelector(BLOCK_SEL))) {
+        if (n.tagName === 'A' && n.querySelector && n.querySelector(BLOCK_SEL)) {
+          add(anchorWrap(n, flatten(n, onNavy), onNavy));
+        } else if (BLOCK.has(n.tagName) || (n.querySelector && n.querySelector(BLOCK_SEL))) {
           add(flatten(n, onNavy));
         } else {
           out += inlineNode(n, onNavy);
@@ -378,7 +417,16 @@ async function extractArticle(page, html) {
       const out = [];
       let run = [];
       const flush = () => {
-        if (run.length) out.push({ kind: 'list', ordered: list.tagName === 'OL', items: run });
+        if (run.length) {
+          out.push({
+            kind: 'list',
+            ordered: list.tagName === 'OL',
+            // The packet honours `start` and the email did not, so the same
+            // list printed 5,6,7 in one artifact and 1,2,3 in the other.
+            start: Number(list.getAttribute('start')) || undefined,
+            items: run,
+          });
+        }
         run = [];
       };
       for (const li of list.children) {
@@ -414,7 +462,7 @@ async function extractArticle(page, html) {
 
     /** One element -> its email blocks. Split out so a list item, a table cell
         and the body can all reach the same handling. */
-    const blocksOfNode = (el, onNavy) => {
+    const blocksOfNodeRaw = (el, onNavy) => {
       const cls = el.classList;
       switch (el.tagName) {
         case 'P':
@@ -492,7 +540,8 @@ async function extractArticle(page, html) {
                renders as an ordinary list in document order, rather than being
                merged into the panel above the paragraph that introduced it. */
             const before = [], after = [], items = [];
-            let phase = 0, heading = '';
+            let phase = 0;
+            let heading = '';
             const pair = (nav, lite) => ({ nav, lite });
             for (const part of parts) {
               if (part.label) continue;
@@ -529,34 +578,48 @@ async function extractArticle(page, html) {
                 heading = text(part.el);
                 continue;
               }
-              /* The light ground is always computed; the navy one only for the
-                 simple prose that can stay in the panel. Computing both for
-                 every node doubled the work at each nesting level — 1.9x per
-                 level measured, so a deeply nested panel ran past the job
-                 timeout and sent no email at all. */
+              // Both grounds, always — the cache makes it cheap, and choosing
+              // by destination is the only way a block cannot end up coloured
+              // for the ground it is not on.
               const lite = blocksOfNode(part.el, false);
-              const simple = lite.length &&
-                lite.every(b => ['p', 'disclaimer', 'h2', 'h3'].includes(b.kind));
-              const nav = (isAction && phase === 0 && simple)
-                ? blocksOfNode(part.el, true)
-                : lite;
+              const nav = isAction ? blocksOfNode(part.el, true) : lite;
               lite.forEach((b, i) => sink.push(pair(nav[i] || b, b)));
             }
 
-            // Only the action panel has a `lead` slot; folding a sources box's
-            // prose into one dropped it, because that panel renders label and
-            // citations and nothing else.
+            /* Only the action panel has a `lead` slot; folding a sources box's
+               prose into one dropped it, because that panel renders label and
+               citations and nothing else.
+
+               And the panel can only absorb a PREFIX. Pulling every paragraph
+               into it and emitting the rest above printed a blockquote before
+               the heading and the prose that preceded it. So: if anything in
+               `before` cannot live in the panel, nothing does — the heading and
+               all of it are emitted in document order, and the panel is just
+               its items. */
+            const canLead = b => isAction &&
+              ['p', 'disclaimer', 'h2', 'h3'].includes(b.kind);
+            const allLead = before.every(x => canLead(x.lite));
             const lead = [], leadOut = [];
-            for (const { nav, lite } of before) {
-              if (!isAction) leadOut.push(lite);
-              else if (nav.kind === 'p' || nav.kind === 'disclaimer') lead.push(nav.html);
-              else if (nav.kind === 'h2' || nav.kind === 'h3') lead.push(`<strong>${nav.html || escHtml(nav.text)}</strong>`);
-              else leadOut.push(lite);
+            if (allLead) {
+              for (const { nav } of before) {
+                if (nav.kind === 'p' || nav.kind === 'disclaimer') lead.push(nav.html);
+                else lead.push(`<strong>${nav.html || escHtml(nav.text)}</strong>`);
+              }
+            } else {
+              if (isAction && heading) leadOut.push({ kind: 'h3', text: heading, html: '' });
+              heading = '';
+              for (const { lite } of before) leadOut.push(lite);
             }
             /* No items, no panel. An action list whose only <ul> belonged to a
                nested container rendered as an empty navy bar carrying just its
                heading, and a sources box with prose and no citations printed an
                empty <ul> with its label below the prose that introduced it. */
+            /* No items, no panel — an action list whose only <ul> belonged to a
+               nested container rendered as an empty navy bar carrying just its
+               heading, and a sources box with prose and no citations printed an
+               empty <ul> below the prose that introduced it. The fallback uses
+               the LIGHT copies: `lead` is coloured for navy, so emitting it as
+               ordinary paragraphs put cream and gold on white. */
             const panel = items.length
               ? [isAction
                   ? { kind: 'action', heading, lead, items }
@@ -564,7 +627,7 @@ async function extractArticle(page, html) {
               : [
                   ...(isAction && heading ? [{ kind: 'h3', text: heading, html: '' }] : []),
                   ...(!isAction && text(label) ? [{ kind: 'h3', text: text(label), html: '' }] : []),
-                  ...lead.map(html => ({ kind: 'p', html })),
+                  ...(allLead ? before.map(x => x.lite) : []),
                 ];
             return [...leadOut, ...panel, ...after.map(x => x.lite)];
           }
@@ -574,6 +637,22 @@ async function extractArticle(page, html) {
           return text(el) ? [{ kind: 'p', html: inline(el, onNavy) }] : [];
         }
       }
+    };
+
+    /* Both grounds are computed for every part of a panel, and each recursed in
+       full — 1.9x per nesting level measured, so a deeply nested panel ran past
+       the job's timeout and sent no email at all. A per-(element, ground) cache
+       makes it linear, which is what lets the navy version be computed
+       unconditionally: the heuristic that used to avoid the cost skipped it for
+       any part whose blocks were not all simple prose, and a paragraph inside
+       such a part then rendered navy-on-navy in the panel. */
+    const nodeCache = new WeakMap();
+    const blocksOfNode = (el, onNavy) => {
+      let slot = nodeCache.get(el);
+      if (!slot) { slot = {}; nodeCache.set(el, slot); }
+      const k = onNavy ? 'navy' : 'light';
+      if (!(k in slot)) slot[k] = blocksOfNodeRaw(el, onNavy);
+      return slot[k];
     };
 
     const blocksOf = (root, onNavy = false) => {
@@ -593,7 +672,10 @@ async function extractArticle(page, html) {
           // can still WRAP blocks, and inlineNode() returns '' for those. The
           // packet rendered them; the email dropped them silently. <noscript>
           // in particular is live markup now that page scripting is disabled.
-          if (node.querySelector && node.querySelector(BLOCK_SEL)) {
+          if (node.tagName === 'A' && node.querySelector && node.querySelector(BLOCK_SEL)) {
+            flush();
+            out.push({ kind: 'p', html: anchorWrap(node, flatten(node, onNavy), onNavy) });
+          } else if (node.querySelector && node.querySelector(BLOCK_SEL)) {
             flush();
             out.push(...blocksOf(node, onNavy));
           } else {
@@ -816,7 +898,12 @@ function fitEmailHtml(prs, generatedOn, att) {
 }
 
 /** Visible characters an article's HTML should produce, for the packet check. */
-const plainLen = html => String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+const plainLen = html => String(html || '')
+  // Comments first, and as whole units: `<[^>]+>` stops at the first `>`, so a
+  // comment containing one leaked its prose into the expected length and the
+  // packet was judged to have lost text it never had.
+  .replace(/<!--[\s\S]*?-->/g, ' ')
+  .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
 
 function buildHtml(prs, generatedOn) {
   const totalArticles = prs.reduce((n, pr) => n + pr.articles.length, 0);
@@ -949,6 +1036,7 @@ function buildHtml(prs, generatedOn) {
 
   .draft-body .action-list { background:var(--navy-900); border-radius:3mm; padding:7mm; margin:6mm 0; break-inside:avoid; }
   .draft-body .action-list h2, .draft-body .action-list h3 { color:var(--gold-300); margin:0 0 3mm; font-size:11.5pt; }
+  .draft-body .action-list p { color:rgba(245,240,232,.9); }
   .draft-body .action-list ul { list-style:none; margin:0; }
   .draft-body .action-list li { position:relative; padding-left:6mm; color:rgba(245,240,232,.9); margin-bottom:2mm; }
   .draft-body .action-list li::before { content:"\\2713"; position:absolute; left:0; top:0; font-family:var(--serif); font-weight:700; color:var(--gold-500); }
@@ -1119,7 +1207,10 @@ async function main() {
     // networkidle0 times out and takes the whole packet with it. Wait for the
     // document, then give the fonts a bounded moment to settle — a packet in
     // fallback faces beats no packet at all.
-    await page.setContent(html, { waitUntil: 'load', timeout: 60_000 });
+    // 'domcontentloaded', not 'load'. Nothing in the packet needs a subresource
+    // any more — images are stripped — and the webfonts have their own bounded
+    // race below. Waiting on 'load' meant one unreachable asset took the run.
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     /* The bound has to live in NODE, not in the page. With page scripting
        disabled the page's own setTimeout never fires, so the old in-page race
        had nothing racing: when document.fonts.ready did not settle it blocked
@@ -1186,8 +1277,8 @@ async function main() {
         ? `; PR ${[...emptyPrs].map(n => '#' + n).join(', ')} came out much shorter than the source`
         : '';
       console.log(`::warning::The packet rendered ${shown.drafts} of ${expected} drafts${short}. ` +
-                  'It is still attached, but those drafts are NOT counted as delivery, so the ' +
-                  'next run will rebuild and send again.');
+                  'It is still attached. Any draft the email did not also print in full is not ' +
+                  'counted as delivered, so the next run will rebuild and send it again.');
     }
 
     const printedPaths = new Set(await writeEmail(rendered, true));

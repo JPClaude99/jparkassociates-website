@@ -208,11 +208,13 @@ export const htmlBudget = () => Math.floor(GMAIL_CLIP_BYTES / WIRE_OVERHEAD);
 /* Items arrive flattened, each carrying its nesting depth. Nested <ul> inside
    <li> is the markup mail clients disagree about most, so depth becomes an
    indent on a flat list — same reading order, no client-specific collapse. */
-const listHtml = (items, ordered) => {
+const listHtml = (items, ordered, start) => {
   const norm = items.map(i => (typeof i === 'string' ? { html: i, depth: 0 } : i));
   const tag = ordered ? 'ol' : 'ul';
+  // `start` carried through, or the packet prints 5,6,7 and the email 1,2,3.
+  const from = ordered && start > 1 ? ` start="${Number(start)}"` : '';
   return `
-      <${tag} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
+      <${tag}${from} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
         ${norm.map(i => `<li style="margin:0 0 7px;${i.depth ? `margin-left:${i.depth * 18}px;list-style-type:circle;` : ''}">${i.html}</li>`).join('')}
       </${tag}>`;
 };
@@ -291,7 +293,7 @@ export function articleBlocksHtml(blocks) {
       case 'h3':
         return `<h3 class="t-title" style="margin:22px 0 8px;font:700 16px/1.35 ${SERIF};color:${C.NAVY_900};">${b.html || esc(b.text)}</h3>`;
       case 'list':
-        return listHtml(b.items, b.ordered);
+        return listHtml(b.items, b.ordered, b.start);
       case 'table':
         return tableHtml(b.rows);
       case 'pre':
