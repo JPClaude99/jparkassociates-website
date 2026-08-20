@@ -103,6 +103,25 @@ async function prArticleFiles(number) {
     .map(f => f.filename);
 }
 
+/* Which of those files are REVISIONS of something already published. A [Ledger]
+   pull request that corrects a live article is ordinary — "Correct the July 31
+   estimated-tax figure" touches one blog/*.html and adds none — and the review
+   email called every draft in it "not yet live on jparkassociates.com", which
+   for that article is simply false. */
+async function prRevisedFiles(number) {
+  if (!REPO || !process.env.GITHUB_TOKEN) return new Set();
+  try {
+    const files = [];
+    for (let page = 1; page <= 10; page++) {
+      const batch = await (await gh(`/repos/${REPO}/pulls/${number}/files?per_page=100&page=${page}`)).json();
+      files.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return new Set(files.filter(f => f.status === 'modified' || f.status === 'changed')
+                        .map(f => f.filename));
+  } catch { return new Set(); }
+}
+
 const fileAtRef = (path, ref) =>
   gh(`/repos/${REPO}/contents/${encodeURI(path)}?ref=${ref}`, 'application/vnd.github.raw')
     .then(r => r.text());
@@ -1206,6 +1225,9 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity, printedPath
   // was a promise the message broke sixty kilobytes later.
   const inFull = Math.min(fullCount, all.length);
   const total = all.length + skipped.length;
+  // Drafts that revise something already published. Saying "not yet live" of
+  // one of those is false, and the reviewer reads the sentence as a fact.
+  const revisedCount = all.filter(a => a.revised).length;
   // The intro sentence has always been honest about that; the preheader — the
   // line Gmail shows in the inbox, before anything is opened — still promised
   // "the full text is below" for all twenty-one when seven fitted.
@@ -1215,12 +1237,14 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity, printedPath
       ? `${plural(total, 'Ledger article')} drafted and waiting — the full text is below.`
       : `${plural(total, 'Ledger article')} drafted and waiting — ${inFull} in full below, the rest in the PDF.`;
   const intro = !counted
-    ? `${plural(prs.length, 'pull request')} drafted but not yet live on jparkassociates.com.
-       Merging is what publishes the articles inside.`
+    ? `${plural(prs.length, 'pull request')} waiting on your review.
+       Merging is what publishes the articles inside to jparkassociates.com.`
     : inFull >= total
-      ? `${total === 1 ? 'One article is' : `${total} articles are`} drafted and ready for your review.
+      ? `${total === 1 ? 'One article is' : `${total} articles are`} ready for your review.
          ${total === 1 ? 'It is' : 'They are'} reproduced in full below, exactly as ${total === 1 ? 'it' : 'they'} will read on
-         jparkassociates.com. Merging the pull request is what publishes ${total === 1 ? 'it' : 'them'}.`
+         jparkassociates.com. Merging the pull request is what publishes ${total === 1 ? 'it' : 'them'}${revisedCount
+           ? `; ${revisedCount === total ? (total === 1 ? 'it is a revision' : 'they are revisions') : `${revisedCount} of them ${revisedCount === 1 ? 'is a revision' : 'are revisions'}`} of ${revisedCount === 1 ? 'an article' : 'articles'} already live`
+           : ''}.`
       : `${total} articles are drafted and ready for your review. ${inFull === 1 ? 'One is' : `${inFull} are`}
          reproduced in full below, exactly as ${inFull === 1 ? 'it' : 'they'} will read on jparkassociates.com;
          the rest ${skipped.length ? 'are named further down' : 'are in the attached PDF'}.
@@ -1395,7 +1419,7 @@ function buildHtml(prs, generatedOn) {
   const drafts = prs.map(pr => pr.articles.map((a, i) => `
     <article class="draft" data-pr="${esc(pr.number)}" data-chars="${plainLen(a.bodyHtml)}">
       <header class="draft-hero">
-        <span class="draft-origin">PR #${esc(pr.number)} &middot; draft ${i + 1} of ${pr.articles.length} &middot; <code>${esc(a.path)}</code></span>
+        <span class="draft-origin">PR #${esc(pr.number)} &middot; ${a.revised ? 'revision' : 'draft'} ${i + 1} of ${pr.articles.length} &middot; <code>${esc(a.path)}</code></span>
         ${a.category ? `<span class="cat">${esc(a.category)}</span>` : ''}
         <h1>${esc(a.title)}</h1>
         <div class="draft-meta">
@@ -1729,6 +1753,7 @@ async function main() {
     for (const pr of prs) {
       const { byFile, order, general } = parseNotes(pr.body);
       const paths = await prArticleFiles(pr.number);
+      const revised = await prRevisedFiles(pr.number);
       const articles = [];
       const skipped = [];
       /* The subset of `skipped` that is a genuine FAILURE rather than a file
@@ -1753,7 +1778,8 @@ async function main() {
           skipped.push(path);
           continue;
         }
-        articles.push({ ...extracted, path, notesMd: byFile.get(path) || '' });
+        articles.push({ ...extracted, path, revised: revised.has(path),
+                        notesMd: byFile.get(path) || '' });
       }
 
       if (!articles.length) {
@@ -1908,8 +1934,16 @@ async function main() {
       const key = (pr, a) => `${pr.number}:${a.path}`;
       const carried = rendered
         .filter(pr => (pr.articles.length
-          ? ((packetOk && !emptyPrs.has(String(pr.number)))
-             || pr.articles.every(a => printedPaths.has(key(pr, a))))
+          /* A sibling that THREW counts against the whole pull request. The
+             check used to look only at what rendered, and `expected` counts
+             rendered articles, so a pull request with one good article and one
+             that threw was marked delivered and its failure never retried —
+             the inverse of the rule the zero-rendered branch applies. A throw
+             is a fetch or a page that died, which is usually transient; a file
+             that is simply not an article lands in `skipped`, not here. */
+          ? !(pr.failed || []).length
+            && ((packetOk && !emptyPrs.has(String(pr.number)))
+                || pr.articles.every(a => printedPaths.has(key(pr, a))))
           /* Nothing rendered from this pull request. `[].every()` is true, so
              this branch has to be spelled out or a run in which EVERY article
              failed would record every pull request as delivered.

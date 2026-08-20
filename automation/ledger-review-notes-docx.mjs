@@ -17,7 +17,8 @@
    builder, so the two can never bind a note to a different article.
 
    Branding follows emails/_template.html and email-chrome.mjs: navy masthead,
-   gold letterspaced eyebrows, Georgia headings, Arial body, cream note grounds.
+   gold letterspaced eyebrows, Georgia draft titles, Arial body and section
+   headings, cream note grounds.
    Every page is stamped NOT FOR PUBLICATION — this document is working paper,
    and it must never be mistaken for something a client could receive.
 
@@ -166,19 +167,35 @@ async function articleTitle(path, ref) {
  * inline code and links, including bold inside a link. Anything unrecognised
  * stays literal text — a stray asterisk must never eat the rest of a sentence.
  */
-/* U+E000..U+E0FF is a private-use area: nothing in a pull-request body can
-   contain these, and xmlSafe leaves them alone, so they are safe sentinels. */
-const ESC_BASE = 0xe000;
-const ESCAPABLE = '\\`*_{}[]()#+-.!~|<>&"\'';
 /* Backslash escapes are resolved BEFORE the alternation runs, the way marked
    resolves them in a pre-pass. As one more alternative they could not win
    against an emphasis alternative that started earlier: "*a\*b*" printed an
    italic "a\" and a literal "b*", showing the backslash the author wrote to
-   hide the asterisk and mis-terminating the emphasis. */
-const maskEscapes = t => String(t).replace(/\\([\\`*_{}\[\]()#+\-.!~|<>&"'])/g,
-  (m, c) => String.fromCharCode(ESC_BASE + ESCAPABLE.indexOf(c)));
-const unmaskEscapes = t => String(t).replace(/[\ue000-\ue0ff]/g,
-  c => ESCAPABLE[c.charCodeAt(0) - ESC_BASE] || '');
+   hide the asterisk and mis-terminating the emphasis.
+
+   An escape becomes ESC + one index character. ESC is U+E000, private-use, and
+   any U+E000 ALREADY IN THE BODY is doubled first so it round-trips — the flat
+   "nothing can contain these" version deleted a Powerline glyph pasted out of a
+   terminal prompt (U+E0A0) and turned a stray U+E003 into an underscore, while
+   the packet printed both unchanged. */
+const ESC = '\ue000';
+const ESC_BASE = 0xe001;
+const ESCAPABLE = '\\`*_{}[]()#+-.!~|<>&"\'';
+const maskEscapes = t => String(t)
+  .split(ESC).join(ESC + ESC)
+  .replace(/\\([\\`*_{}\[\]()#+\-.!~|<>&"'])/g,
+           (m, c) => ESC + String.fromCharCode(ESC_BASE + ESCAPABLE.indexOf(c)));
+/* `literal` restores the BACKSLASH as well as the character: inside a code span
+   CommonMark keeps a backslash literal, so `\d+\.` is a regex and printing it
+   as `d+.` corrupts what the reviewer is meant to copy. */
+const unmask = (t, literal = false) => String(t).replace(
+  new RegExp(ESC + '([\\s\\S])', 'g'),
+  (m, c) => {
+    if (c === ESC) return ESC;
+    const ch = ESCAPABLE[c.charCodeAt(0) - ESC_BASE];
+    return ch === undefined ? m : (literal ? '\\' + ch : ch);
+  });
+const unmaskEscapes = t => unmask(t, false);
 
 function runs(md, base = {}, depth = 0, inLink = false) {
   if (!depth && !inLink) md = maskEscapes(md);
@@ -186,7 +203,7 @@ function runs(md, base = {}, depth = 0, inLink = false) {
      that used to hold for link text no longer does. Each step strictly shortens
      the string, so this terminates on its own; the cap is a backstop against a
      pathological body, and falling back to a plain run loses styling, never text. */
-  if (depth > 6) return [new TextRun({ text: md, font: SANS, size: pt(10), color: SLATE, ...base })];
+  if (depth > 6) return [new TextRun({ text: unmaskEscapes(md), font: SANS, size: pt(10), color: SLATE, ...base })];
   const out = [];
   /* Notes on the alternatives, each of which was a bug first:
      - `_` emphasis is guarded against word characters on both sides. GFM
@@ -265,10 +282,16 @@ function runs(md, base = {}, depth = 0, inLink = false) {
       // font and size after the spread, like color: a heading passes font: SANS
       // and size: pt(11) as `base`, and spreading it last repainted the code
       // span in Arial — a file path in a heading then read as a hyperlink.
-      out.push(new TextRun({ text: unmaskEscapes(codeText), ...base, font: 'Consolas',
+      out.push(new TextRun({ text: unmask(codeText, true), ...base, font: 'Consolas',
                              size: Math.max(14, Math.round((base.size || pt(10)) * 0.95)),
                              color: NAVY_700 }));
     } else {
+      /* EVERY destination goes through this. Three of the four branches used to
+         take the raw match: a masked escape reached word/_rels as a literal
+         U+E000 (a dead link whose visible text read correctly), and an entity
+         in an autolink or a bare URL opened a different address than the
+         packet's link. */
+      const target = u => decodeEntities(unmaskEscapes(String(u || '').trim()));
       const linkRun = text => new TextRun({
         text: unmaskEscapes(text), font: SANS, size: pt(10), ...base,
         color: NAVY_700, underline: { type: 'single', color: NAVY_700 },
@@ -276,10 +299,10 @@ function runs(md, base = {}, depth = 0, inLink = false) {
       if (g.bare !== undefined) {
         // Trailing sentence punctuation is not part of the URL.
         const m2 = g.bare.match(/^(.*?)([.,;:!?]*)$/s);
-        const target = m2[1], tail = m2[2];
+        const dest = target(m2[1]), tail = m2[2];
         out.push(inLink
-          ? linkRun(target)
-          : new ExternalHyperlink({ link: target, children: [linkRun(target)] }));
+          ? linkRun(m2[1])
+          : new ExternalHyperlink({ link: dest, children: [linkRun(m2[1])] }));
         if (tail) lit(tail);
         continue;
       }
@@ -288,12 +311,12 @@ function runs(md, base = {}, depth = 0, inLink = false) {
         // and linking; this printed a bare "!" in front of a link.
         const label = unmaskEscapes(g.alt || '').trim() || 'image';
         out.push(inLink ? linkRun(label)
-          : new ExternalHyperlink({ link: decodeEntities(g.img), children: [linkRun(label)] }));
+          : new ExternalHyperlink({ link: target(g.img), children: [linkRun(label)] }));
         continue;
       }
       if (g.mail !== undefined) {
         out.push(inLink ? linkRun(g.mail)
-          : new ExternalHyperlink({ link: `mailto:${g.mail}`, children: [linkRun(g.mail)] }));
+          : new ExternalHyperlink({ link: `mailto:${target(g.mail)}`, children: [linkRun(g.mail)] }));
         continue;
       }
       /* A HYPERLINK INSIDE A HYPERLINK IS NOT A THING WORD CAN OPEN. docx only
@@ -306,7 +329,7 @@ function runs(md, base = {}, depth = 0, inLink = false) {
       if (g.auto !== undefined) {
         // A bare autolink: the text and the target are the same string.
         out.push(inLink ? linkRun(g.auto) : new ExternalHyperlink({
-          link: g.auto,
+          link: target(g.auto),
           children: [linkRun(g.auto)],
         }));
         continue;
@@ -322,7 +345,7 @@ function runs(md, base = {}, depth = 0, inLink = false) {
       // Entities in a destination are decoded, the way marked decodes them:
       // taken verbatim, "?a=1&amp;b=2" reached Word as "?a=1&amp;amp;b=2" and
       // opened a different address than the packet's link.
-      const url = decodeEntities(g.url.replace(/^<(.*)>$/s, '$1').trim());
+      const url = target(g.url.replace(/^<(.*)>$/s, '$1'));
       const kids = g.text ? runs(g.text, style, depth + 1, true)
                           : [new TextRun({ text: unmaskEscapes(url || g.text || ''), font: SANS, size: pt(10), ...style })];
       // An empty destination — [text](<>) — would become an external
@@ -376,8 +399,15 @@ const bullet = (md, ordered, level, instance = 0, n = null) => new Paragraph({
 });
 
 /** A markdown table -> a bordered Word table. Alignment rows are dropped. */
+/* Split on a pipe that is NOT escaped. Splitting on every pipe turned
+   "| a \| b | fine |" into three cells against a two-column header, so the
+   headings no longer labelled the data and a stray backslash was printed. */
+const splitRow = line => String(line).trim()
+  .replace(/^\|/, '').replace(/\|\s*$/, '')
+  .split(/(?<!\\)\|/);
+
 function mdTable(lines) {
-  const cells = l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+  const cells = l => splitRow(l).map(c => c.trim());
   // Drop row 1 and only row 1. The caller has already established that it is
   // the alignment row; filtering by shape instead deleted legitimate data rows
   // such as `| - | - |`, which is how a notes table says "not applicable".
@@ -410,9 +440,13 @@ function mdTable(lines) {
    a second article's "1. 2." cannot continue the first's. */
 let olInstance = 0;
 
-const isDelimiterRow = line => {
-  const cells = String(line).trim().replace(/^\|/, '').replace(/\|\s*$/, '').split('|');
-  return cells.length > 0 && cells.every(c => /^\s*:?-+:?\s*$/.test(c));
+// Every cell dashes, AND as many cells as the header row — both are GFM
+// requirements, and without the second a two-column header over a one-cell
+// delimiter still rendered as a table here and as a paragraph in the packet.
+const isDelimiterRow = (line, header) => {
+  const cells = splitRow(line);
+  if (!cells.length || !cells.every(c => /^\s*:?-+:?\s*$/.test(c))) return false;
+  return header === undefined || cells.length === splitRow(header).length;
 };
 
 /* Reference links. `marked` collects "[label]: https://…" definition lines,
@@ -421,13 +455,40 @@ const isDelimiterRow = line => {
    inline form before the block walk, which is the smallest change that makes
    the note and the packet agree. */
 const resolveRefs = md => {
+  /* CODE IS NOT MARKDOWN. This ran over the whole body before the fence branch
+     ever saw it, so a definition quoted inside a ``` block was deleted from the
+     sample and a [label] beside it was rewritten into a link the author never
+     typed — in a document whose entire purpose is to be copied from. A fence
+     holding nothing but definitions disappeared altogether. Fences and 4-space
+     indented blocks are lifted out, the resolution runs on what is left, and
+     they go back exactly as they were. */
+  const src = String(md ?? '').replace(/\r\n/g, '\n').split('\n');
+  const kept = [];
+  const out = [];
+  let fence = null;
+  for (const line of src) {
+    const t = line.trim();
+    if (fence) {
+      const m = t.match(/^(`{3,}|~{3,})\s*$/);
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+      kept.push(line); out.push(ESC + '\ue0ff'); continue;
+    }
+    const open = t.match(/^(`{3,}|~{3,})/);
+    if (open) { fence = open[1]; kept.push(line); out.push(ESC + '\ue0ff'); continue; }
+    // An indented code block: four spaces or a tab, and not a list continuation.
+    if (/^(?: {4}|\t)/.test(line) && line.trim()) { kept.push(line); out.push(ESC + '\ue0ff'); continue; }
+    out.push(line);
+  }
+  const restore = t => { let i = 0; return t.split('\n')
+    .map(l => (l === ESC + '\ue0ff' ? kept[i++] : l)).join('\n'); };
+
   const defs = new Map();
-  const body = String(md ?? '').replace(
+  const body = out.join('\n').replace(
     /^[ \t]*\[([^\]\n]+)\]:[ \t]*(\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$\n?/gm,
     (m, label, url) => { if (!defs.has(label.toLowerCase())) defs.set(label.toLowerCase(), url); return ''; });
-  if (!defs.size) return body;
+  if (!defs.size) return restore(out.join('\n'));
   const at = label => defs.get(String(label).toLowerCase());
-  return body
+  return restore(body
     // [text][label]
     .replace(/\[([^\]\n]*)\]\[([^\]\n]+)\]/g, (m, text, label) => {
       const u = at(label); return u ? `[${text}](${u})` : m;
@@ -437,7 +498,7 @@ const resolveRefs = md => {
       if (bang) return m;
       const u = at(label);
       return u && (empty || defs.has(label.toLowerCase())) ? `[${label}](${u})` : m;
-    });
+    }));
 };
 
 function mdBlocks(md) {
@@ -446,7 +507,7 @@ function mdBlocks(md) {
   let para = [];
   /* One counter per nesting level, so a sub-list under a hand-numbered list
      counts on its own instead of every item printing the parent's number. */
-  let inOl = false, olNums = [];
+  let inOl = false, olNums = [], olDelim = '';
 
   const flush = () => {
     if (!para.length) return;
@@ -506,6 +567,35 @@ function mdBlocks(md) {
 
     if (!t) { flush(); continue; }
 
+    /* A 4-SPACE INDENTED CODE BLOCK. There was no branch for one, so its lines
+       reached the paragraph buffer trimmed and were joined with a space: two
+       shell commands became one line, and the URL in them was linkified. Only
+       when a paragraph is not already open — an indented line under a paragraph
+       is a lazy continuation, not code. */
+    if (!para.length && !inOl && /^(?: {4}|\t)/.test(line)) {
+      const code = [];
+      for (; i < lines.length; i++) {
+        const l = lines[i];
+        if (/^(?: {4}|\t)/.test(l)) { code.push(l.replace(/^(?: {4}|\t)/, '')); continue; }
+        if (!l.trim()) { code.push(''); continue; }
+        break;
+      }
+      i--;
+      while (code.length && !code[code.length - 1].trim()) code.pop();
+      if (code.length) {
+        out.push(new Paragraph({
+          spacing: { after: 120 },
+          shading: { type: ShadingType.CLEAR, fill: CREAM },
+          indent: { left: 240, right: 240 },
+          children: code.flatMap((c, n) => [
+            ...(n ? [new TextRun({ break: 1 })] : []),
+            new TextRun({ text: c, font: 'Consolas', size: pt(9), color: NAVY_700 }),
+          ]),
+        }));
+      }
+      continue;
+    }
+
     if (/^#{1,6}\s/.test(t)) {
       flush();
       const depth = t.match(/^#+/)[0].length;
@@ -532,7 +622,7 @@ function mdBlocks(md) {
        mdTable spliced that row out unconditionally, and the word "pending"
        vanished from the document — while `marked` renders none of those three
        lines as a table at all. */
-    if (t.startsWith('|') && lines[i + 1] && isDelimiterRow(lines[i + 1])) {
+    if (t.startsWith('|') && lines[i + 1] && isDelimiterRow(lines[i + 1], line)) {
       flush();
       const block = [];
       while (i < lines.length && lines[i].trim().startsWith('|')) block.push(lines[i++]);
@@ -547,27 +637,35 @@ function mdBlocks(md) {
       const level = Math.min(2, Math.floor(li[1].replace(/\t/g, '  ').length / 2));
       const ordered = /\d/.test(li[2]);
       // A new numbering instance whenever a TOP-LEVEL ordered list starts.
-      if (ordered && !level && !inOl) {
+      /* A NEW LIST, not just a new item: "1." and "1)" are different markers, so
+         a run of each is two lists — Word merged them into one sequence and
+         printed 1, 2, 3, 4 where the packet printed 1, 2 then 1, 2. */
+      const delim = ordered ? li[2].slice(-1) : '';
+      if (ordered && !level && (!inOl || delim !== olDelim)) {
         olInstance++;
-        const first = parseInt(li[2], 10);
-        olNums = [Number.isFinite(first) && first !== 1 ? first : null];
+        olNums = [];
+        olDelim = delim;
       }
       if (!level) inOl = ordered;
       let n = null;
       if (ordered) {
-        // Hand-numbered only while the top level is: a Word list cannot be told
-        // where to start, so once one level is written out by hand the levels
-        // under it have to be too, or they inherit the parent's number and three
-        // different steps all print as "6.".
-        if (olNums[0] !== null && olNums[0] !== undefined) {
-          if (olNums[level] === undefined || olNums[level] === null) {
-            const own = parseInt(li[2], 10);
-            olNums[level] = Number.isFinite(own) ? own : 1;
-          }
-          n = olNums[level];
-          olNums[level]++;
-          olNums.length = level + 1;      // a shallower item restarts the deeper ones
+        /* A LEVEL IS HAND-NUMBERED IF ITS OWN LIST DOES NOT START AT 1, or if
+           an enclosing level already is — a Word list cannot be told where to
+           start, so once one level is written out by hand the levels under it
+           have to be too or they inherit the parent's number. Gating the whole
+           thing on the TOP level meant a sub-list written "5. / 6." under an
+           ordinary "1." list printed 1. and 2., while the packet printed 5 and
+           6: "check step 5" naming different steps in one email's two
+           enclosures. */
+        if (olNums[level] === undefined || olNums[level] === null) {
+          const own = parseInt(li[2], 10);
+          const outerHand = olNums.slice(0, level).some(v => v !== null && v !== undefined);
+          olNums[level] = (Number.isFinite(own) && own !== 1) || outerHand
+            ? (Number.isFinite(own) ? own : 1)
+            : null;
         }
+        if (olNums[level] !== null) { n = olNums[level]; olNums[level]++; }
+        olNums.length = level + 1;        // a shallower item restarts the deeper ones
       } else if (!level) {
         olNums = [];
       }
@@ -660,7 +758,9 @@ function articleBlock(title, path, md) {
   return [
   new Paragraph({
     keepNext: true, spacing: { before: 320, after: 40 },
-    children: [new TextRun({ text: title, font: SANS, bold: true, size: pt(14), color: NAVY_900 })],
+    // Georgia, like the headline type in the email and the packet — the header
+    // note has always claimed the pairing and every heading was Arial.
+    children: [new TextRun({ text: title, font: SERIF, bold: true, size: pt(14), color: NAVY_900 })],
   }),
   new Paragraph({
     keepNext: true, spacing: { after: 120 },
@@ -698,15 +798,19 @@ async function main() {
 
   for (const pr of prs) {
     const { byFile, order, titles, general } = parseNotes(pr.body);
-    let paths = [];
+    let paths = [], listed = true;
     try {
       paths = await prArticleFiles(pr.number);
     } catch (err) {
       console.log(`::warning::Could not list files for PR #${pr.number}: ${err.message}`);
+      listed = false;
     }
-    // Fall back to whatever the PR body itself bound, so a GitHub hiccup costs
-    // the file list but never the notes.
-    if (!paths.length) paths = [...byFile.keys()];
+    /* Fall back to whatever the PR body bound ONLY when the listing FAILED, so
+       a GitHub hiccup costs the file list but never the notes. Falling back
+       whenever the list came back empty made this document disagree with the
+       other two about the week: a pull request that legitimately touched no
+       blog/*.html was "1 draft" here and "0 articles" on the packet cover. */
+    if (!listed && !paths.length) paths = [...byFile.keys()];
 
     const rank = p => (order.has(p) ? order.get(p) : Number.MAX_SAFE_INTEGER);
     paths = [...paths].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));

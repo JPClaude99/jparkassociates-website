@@ -61,9 +61,18 @@ jobs:
   notify:
     # Only merged Ledger PRs. A closed-without-merge PR published nothing.
     # Manual dispatch is always allowed — it re-sends the notice for a PR you name.
+    # INTO THE DEFAULT BRANCH, and this matters. GitHub Pages serves the
+    # default branch, so a [Ledger] pull request merged anywhere else has
+    # published nothing — and this notice says, in as many words, that the
+    # article "is publishing to jparkassociates.com now". Merging a stacked or
+    # held-back branch used to send that notice for a file no reader could
+    # reach, and then send it a SECOND time when that branch itself reached the
+    # default branch and the same blog/*.html came through as added again.
+    # A dispatch names a pull request explicitly and is always allowed.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == github.event.repository.default_branch &&
        (startsWith(github.event.pull_request.title, '[Ledger]') ||
         startsWith(github.event.pull_request.head.ref, 'ledger/auto-')))
     runs-on: ubuntu-latest
@@ -111,8 +120,14 @@ jobs:
         with:
           node-version: '24'
 
+      # continue-on-error, and the job is failed deliberately at the end instead.
+      # The builder writes the notice for every article it CAN announce and then
+      # raises the orphan alarm; failing the step outright threw that notice
+      # away, so one unlisted article silenced the announcement of every article
+      # merged beside it.
       - name: Build the publish notice
         id: build
+        continue-on-error: true
         if: steps.lock.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -146,6 +161,14 @@ jobs:
           subject: ${{ steps.build.outputs.subject }}
           html_file: ${{ runner.temp }}/published.html
           body: ${{ steps.build.outputs.text }}
+
+      # After the send, so the notice is away before the run goes red. GitHub
+      # emails the repo admin about a failed run, and that is the alarm.
+      - name: Fail if the builder raised the orphan alarm
+        if: steps.lock.outputs.cache-hit != 'true' && steps.build.outcome == 'failure'
+        run: |
+          echo "::error::The publish notice builder failed — see its step above. An article may be live and missing from blog/posts.js."
+          exit 1
 
       - name: Remember that this merge was announced
         if: github.event_name != 'workflow_dispatch' && steps.build.outputs.send == 'yes'

@@ -73,14 +73,38 @@ async function isArticle(slug) {
        suppressed the notice for the real article merged alongside it. Split the
        attribute on whitespace and compare tokens, which is what the browser
        does. */
-    const m = html.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g) || [];
+    /* The ATTRIBUTE NAME has to be exactly `class`, case-insensitively.
+       \bclass matched data-class=, ng-class= and :class= — any of which on a
+       hub page makes it an "article", and if that page is not in the manifest
+       the orphan alarm throws and suppresses the notice for the real article
+       merged beside it. And without the i flag, `Class=` — legal HTML, and this
+       file is hand-edited every run — failed the test, which drops the slug
+       before the alarm can see it and leaves a live article unmentioned by a
+       green run. Both directions, one regex. */
+    /* Comments, scripts and templates are not markup the browser applies. A hub
+       page whose comment merely MENTIONS `<main class="article-body">` — the
+       natural way to explain what it is not — was read as an article; if it was
+       not in the manifest the orphan alarm threw and suppressed the notice for
+       the real article merged beside it. Stripped before the attribute scan. */
+    const live = html
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<template\b[\s\S]*?<\/template>/gi, ' ');
+    const m = live.match(/(?:^|[\s"'\/])class\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi) || [];
     return m.some(a => {
       const v = a.replace(/^[^=]*=\s*/, '').replace(/^["']|["']$/g, '');
       return v.split(/\s+/).includes('article-body');
     });
   } catch {
-    console.log(`::warning::blog/${slug}.html is not in the checkout; not treating it as an article.`);
-    return false;
+    /* UNREADABLE IS NOT "NOT AN ARTICLE". Returning false dropped the slug
+       before the orphan alarm below could see it, so an added blog/*.html that
+       the checkout does not have — a dispatch re-send after the base branch
+       moved on, or a merge race — was live, unannounced, and the run was green.
+       Treated as an article instead: the manifest then decides. In it, it is
+       announced; missing from it, the alarm fires and someone finds out. */
+    console.log(`::warning::blog/${slug}.html is not in the checkout; the manifest decides whether it is an article.`);
+    return true;
   }
 }
 
@@ -154,17 +178,20 @@ async function main() {
   // second is live, absent from the index, absent from this email — green run.
   const listed = new Set(published.map(p => p.slug));
   const orphans = slugs.filter(slug => !listed.has(slug));
-  if (orphans.length) {
-    const it = orphans.length === 1 ? 'it' : 'them';
-    // Failing IS the alarm. GitHub mails the repo admin about a failed run,
-    // which is the only way anyone finds out an article shipped unreachable.
-    throw new Error(
-      `PR #${prNumber} added ${orphans.map(s => `blog/${s}.html`).join(', ')}, ` +
+  /* THE ALARM DOES NOT COST THE NOTICE. Throwing here meant an orphan took the
+     announcement of every article merged beside it — articles that are live,
+     indexed, and now unmentioned — because the reviewer's own email never got
+     built. The notice for what IS announceable is written first, and the run
+     fails afterwards; GitHub mails the repo admin about a failed run, which is
+     how anyone finds out an article shipped unreachable. */
+  const orphanError = orphans.length
+    ? `PR #${prNumber} added ${orphans.map(s => `blog/${s}.html`).join(', ')}, ` +
       `${orphans.length === 1 ? 'which is' : 'which are'} live on the site but missing from ` +
-      `blog/posts.js — nothing links to ${it}, and the blog index does not list ${it}. ` +
-      'Add the manifest entries, then re-send this notice with the "Ledger published" ' +
-      'workflow_dispatch.');
-  }
+      `blog/posts.js — nothing links to ${orphans.length === 1 ? 'it' : 'them'}, and the blog ` +
+      `index does not list ${orphans.length === 1 ? 'it' : 'them'}. Add the manifest entries, ` +
+      'then re-send this notice with the "Ledger published" workflow_dispatch.'
+    : '';
+  if (orphanError && !published.length) throw new Error(orphanError);
 
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   const one = published.length === 1;
@@ -248,6 +275,8 @@ async function main() {
   if (process.env.EMAIL_TEXT_OUT) await fs.writeFile(process.env.EMAIL_TEXT_OUT, text);
   if (process.env.SUBJECT_OUT)    await fs.writeFile(process.env.SUBJECT_OUT, subject);
   console.log(`Prepared publish notice for ${published.length} article(s): ${published.map(p => p.slug).join(', ')}`);
+  // Written, then the alarm. The workflow sends what was built and fails after.
+  if (orphanError) throw new Error(orphanError);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

@@ -432,6 +432,15 @@ jobs:
                still the drafts whose text actually rendered. */
             fs.writeFileSync('${{ runner.temp }}/emailed.json',
                              JSON.stringify(drafts.map(d => String(d.number))));
+            /* The drafts that survived the render window. Only these can be
+               marked DELIVERED: a draft closed at 15:47 was still carried in
+               full by the 15:52 email, but under a banner telling the reviewer
+               in writing to ignore it. Marked delivered anyway, it was skipped
+               by every later trigger, so reopening it at 16:10 bought nothing —
+               the only copy the reviewer would get that week was the one they
+               had been told to disregard. */
+            fs.writeFileSync('${{ runner.temp }}/live.json',
+                             JSON.stringify(live.map(s => String(s.number))));
 
             const parts = [];
             if (merged.length) {
@@ -489,9 +498,10 @@ jobs:
           # Plain-text alternative, always sent alongside the HTML part. This is
           # the whole message for a text-only client, so it stands on its own.
           body: |
-            Ledger articles are drafted and ready for your review. They are not
-            live on jparkassociates.com yet — merging the pull request is what
-            publishes them.
+            Ledger articles are ready for your review. Merging the pull request
+            is what publishes them to jparkassociates.com. A [Ledger] pull
+            request may also revise an article that is already live; the HTML
+            version and the PDF packet say which.
 
             ${{ steps.find.outputs.body }}
 
@@ -519,8 +529,8 @@ jobs:
       # record stays unwritten so the floor tries again — otherwise a transient
       # npm failure at 15:45 would mark the week done and the reviewer would
       # never see the articles at all. Two degraded alerts beat one degraded
-      # alert and no review, and there are only two triggers in a week, so this
-      # cannot loop.
+      # alert and no review; what stops that from looping is the attempt cap
+      # below, not the number of triggers — see the header.
       # PER DRAFT, not per run. Gating the whole record on "did this email carry
       # any article at all" locked out a draft whose own article failed to
       # render whenever a sibling's succeeded: recorded as reviewed, delivered
@@ -540,8 +550,8 @@ jobs:
       # are only two triggers in a week" was never true — the announcement scan
       # can be dispatched by hand and re-run after a failure, and every one of
       # its completions fires this workflow.
-      # Written AFTER the send, never before, and always: a run that records
-      # nothing is a run whose draft comes back on the next trigger.
+      # Written AFTER the send, never before: a run that records nothing is a
+      # run whose draft comes back on the next trigger.
       - name: Record what went out
         id: record
         if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
@@ -559,19 +569,29 @@ jobs:
 
             // Every draft the email NAMED gets an attempt counted against it.
             for (const n of read(process.argv[3], []).map(String)) tries[n] = Number(tries[n] || 0) + 1;
-            // Those whose text actually reached the reviewer are finished.
-            for (const n of read(process.argv[2], []).map(String)) { done.add(n); delete tries[n]; }
+            /* Finished = its text reached the reviewer AND the banner did not
+               tell them to ignore it. A draft closed or merged inside the
+               render window is in `carried` — it rendered fine — but the email
+               disowns it, so it is not a review anyone acted on. */
+            const live = new Set(read(process.argv[5], null) === null
+              ? read(process.argv[2], []).map(String)      // no recheck file: trust carried
+              : read(process.argv[5], []).map(String));
+            for (const n of read(process.argv[2], []).map(String)) {
+              if (!live.has(n)) continue;
+              done.add(n); delete tries[n];
+            }
 
             fs.writeFileSync(process.argv[4], JSON.stringify({ done: [...done], tries }));
             const open = Object.entries(tries).map(([n, t]) => `#${n} (attempt ${t})`);
             console.log("Delivered this week:", [...done].map(n => "#" + n).join(", ") || "(none)");
             if (open.length) console.log("Named but not delivered:", open.join(", "));
-          ' "$prev_json" "$carried_json" "$emailed_json" '${{ runner.temp }}/ledger-sent/sent.json'
+          ' "$prev_json" "$carried_json" "$emailed_json" '${{ runner.temp }}/ledger-sent/sent.json' "$live_json"
           echo "keep=yes" >> "$GITHUB_OUTPUT"
         env:
           prev_json: ${{ runner.temp }}/prev.json
           carried_json: ${{ runner.temp }}/carried.json
           emailed_json: ${{ runner.temp }}/emailed.json
+          live_json: ${{ runner.temp }}/live.json
 
       # Cache entries are immutable, so each write takes a fresh key and the
       # restore-keys prefix above picks up the most recent one for the week.
