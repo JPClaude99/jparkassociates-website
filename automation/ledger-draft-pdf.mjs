@@ -135,7 +135,7 @@ async function extractArticle(page, html) {
        artifacts disagreeing completely with nothing to flag it.
        Articles are generated from blog/_template.html and never legitimately
        carry any of these. */
-    for (const el of body.querySelectorAll('style, script, link, meta, base, iframe, object, embed')) {
+    for (const el of body.querySelectorAll('style, script, link, meta, base, iframe, object, embed, title')) {
       el.remove();
     }
     /* Attributes, not just elements. A single inline style can cover the whole
@@ -146,11 +146,18 @@ async function extractArticle(page, html) {
        scripting disabled, but they are stripped so the packet's HTML cannot
        carry one into any future renderer. data-ledger-* is ours: an article
        that spoofs it could delete its own content from the email. */
+    /* An ALLOWLIST, because the denylist kept losing. It was extended for
+       `style`, then for `hidden`, and `<font color="#FFFFFF">` still rendered
+       every word of an article in white on white — a packet that looked blank
+       to a human, measured 392 characters to innerText, and was recorded as
+       delivered with no warning. `bgcolor` is the same trick. Rather than keep
+       guessing which attribute paints next, keep only the ones this pipeline
+       actually reads and drop everything else. */
+    const KEEP_ATTR = new Set(['href', 'src', 'alt', 'colspan', 'rowspan', 'class',
+                               'datetime', 'lang', 'dir', 'scope', 'headers', 'rel', 'start']);
     for (const el of body.querySelectorAll('*')) {
       for (const attr of [...el.attributes]) {
-        const n = attr.name.toLowerCase();
-        if (n.startsWith('on') || n === 'style' || n === 'hidden' || n === 'aria-hidden' ||
-            n.startsWith('data-ledger-')) el.removeAttribute(attr.name);
+        if (!KEEP_ATTR.has(attr.name.toLowerCase())) el.removeAttribute(attr.name);
       }
     }
 
@@ -242,8 +249,15 @@ async function extractArticle(page, html) {
       for (const n of node.childNodes) {
         if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
         if (n.nodeType !== 1) continue;
-        if (BLOCK.has(n.tagName)) add(flatten(n, onNavy));
-        else out += inlineNode(n, onNavy);
+        // Descend into ANYTHING holding block content, not only into tags on
+        // the BLOCK list. <span><p>…</p></span> and a table nested three deep
+        // inside a cell both went through inlineNode(), which returns '' for a
+        // block — present in the packet, gone from the email.
+        if (BLOCK.has(n.tagName) || (n.querySelector && n.querySelector(BLOCK_SEL))) {
+          add(flatten(n, onNavy));
+        } else {
+          out += inlineNode(n, onNavy);
+        }
       }
       return out;
     };
@@ -268,7 +282,19 @@ async function extractArticle(page, html) {
       // Removing outright glued "LEAD<table/>TAIL" into one word; replacing
       // unconditionally split "va<pre/>lue" into two.
       clone.querySelectorAll(`[${MARK}]`).forEach(n => {
-        const before = n.previousSibling, after = n.nextSibling;
+        // Comments and whitespace-only nodes are not text. Letting a comment
+        // count made the separator depend on whether it happened to end in a
+        // space — and this repo's house comment style does.
+        const real = (n2, dir) => {
+          for (let c = n2; c; c = c[dir]) {
+            if (c.nodeType === 8) continue;                       // comment
+            if (c.nodeType === 3 && !c.nodeValue.trim()) continue; // blank text
+            return c;
+          }
+          return null;
+        };
+        const before = real(n.previousSibling, 'previousSibling');
+        const after = real(n.nextSibling, 'nextSibling');
         const endsWs = before && /\s$/.test(before.textContent || '');
         const startsWs = after && /^\s/.test(after.textContent || '');
         const needs = before && after && !endsWs && !startsWs;
@@ -279,6 +305,20 @@ async function extractArticle(page, html) {
     };
 
     const BLOCK_SEL = 'p, h1, h2, h3, h4, h5, h6, ul, ol, table, dl, pre, blockquote, div, section, aside, figure';
+
+    /* A heading may hold a link or inline code, so the email renders its markup
+       rather than its escaped text — but inline() skips block children, so a
+       heading with a <div> inside it would silently lose that part. Offer the
+       markup only when it accounts for ALL the text; otherwise the plain text
+       is the honest answer. */
+    const probe = document.createElement('div');
+    const norm = t => String(t).replace(/\s+/g, ' ').trim();
+    const headBlock = (kind, el, onNavy) => {
+      const plain = text(el);
+      const html = inline(el, onNavy);
+      probe.innerHTML = html;
+      return { kind, text: plain, html: norm(probe.textContent) === norm(plain) ? html : '' };
+    };
     const CONTAINER_CLASS = ['callout', 'action-list', 'sources-box'];
     const OWNED_SEL = 'ul, ol, table, pre, blockquote, dl, figure, .callout, .action-list, .sources-box';
     const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
@@ -305,7 +345,7 @@ async function extractArticle(page, html) {
       const capEl = el.querySelector(':scope > caption');
       const cap = text(capEl);
       const out = [];
-      if (cap) out.push({ kind: 'h3', text: cap, html: inline(capEl, false) });
+      if (cap) out.push(headBlock('h3', capEl, false));
       if (rows.length) { out.push({ kind: 'table', rows }); return out; }
       // No rows is not no content — but the caption is already out, so the
       // fallback must not print it a second time.
@@ -383,9 +423,9 @@ async function extractArticle(page, html) {
                 ? { kind: 'disclaimer', html: inline(el, onNavy) }
                 : { kind: 'p', html: inline(el, onNavy) }]
             : [];
-        case 'H1': case 'H2': return [{ kind: 'h2', text: text(el), html: inline(el, onNavy) }];
+        case 'H1': case 'H2': return [headBlock('h2', el, onNavy)];
         case 'H3': case 'H4':
-        case 'H5': case 'H6': return [{ kind: 'h3', text: text(el), html: inline(el, onNavy) }];
+        case 'H5': case 'H6': return [headBlock('h3', el, onNavy)];
         case 'UL': case 'OL':  return listBlocks(el, onNavy);
         case 'TABLE':          return tableBlock(el);
         case 'DL':             return dlBlock(el, onNavy);
@@ -457,11 +497,15 @@ async function extractArticle(page, html) {
             for (const part of parts) {
               if (part.label) continue;
               if (part.list) {
-                if (phase <= 1) {
+                const asItems = phase <= 1
+                  ? listBlocks(part.list, isAction, 0).flatMap(b => (b.kind === 'list' ? b.items : []))
+                  : [];
+                // An EMPTY <ul> is not the checklist. Letting it advance the
+                // phase demoted the real list below it to plain bullets and
+                // left an empty navy bar where the panel should have been.
+                if (phase <= 1 && asItems.length) {
                   phase = 1;
-                  for (const b of listBlocks(part.list, isAction, 0)) {
-                    if (b.kind === 'list') items.push(...b.items);
-                  }
+                  items.push(...asItems);
                   // Heavy blocks inside those items leave the panel, so they are
                   // computed for the light ground rather than recoloured after.
                   for (const b of listBlocks(part.list, false, 0)) {
@@ -479,17 +523,24 @@ async function extractArticle(page, html) {
                 sink.push(pair(b, b));
                 continue;
               }
-              if (isAction && !heading && /^H[1-6]$/.test(part.el.tagName)) {
+              // Only before the checklist. A heading that follows the steps was
+              // being hoisted above them.
+              if (isAction && !heading && phase === 0 && /^H[1-6]$/.test(part.el.tagName)) {
                 heading = text(part.el);
                 continue;
               }
-              /* Computed on BOTH grounds, and the right one is picked by where
-                 the block ends up. Recolouring afterwards by string-replacing
-                 palette values rewrote an article that legitimately printed a
-                 hex code, and flipped a nested navy panel to navy-on-navy. */
-              const nav = blocksOfNode(part.el, isAction);
+              /* The light ground is always computed; the navy one only for the
+                 simple prose that can stay in the panel. Computing both for
+                 every node doubled the work at each nesting level — 1.9x per
+                 level measured, so a deeply nested panel ran past the job
+                 timeout and sent no email at all. */
               const lite = blocksOfNode(part.el, false);
-              nav.forEach((b, i) => sink.push(pair(b, lite[i] || b)));
+              const simple = lite.length &&
+                lite.every(b => ['p', 'disclaimer', 'h2', 'h3'].includes(b.kind));
+              const nav = (isAction && phase === 0 && simple)
+                ? blocksOfNode(part.el, true)
+                : lite;
+              lite.forEach((b, i) => sink.push(pair(nav[i] || b, b)));
             }
 
             // Only the action panel has a `lead` slot; folding a sources box's
@@ -502,12 +553,24 @@ async function extractArticle(page, html) {
               else if (nav.kind === 'h2' || nav.kind === 'h3') lead.push(`<strong>${nav.html || escHtml(nav.text)}</strong>`);
               else leadOut.push(lite);
             }
-            const panel = isAction
-              ? { kind: 'action', heading, lead, items }
-              : { kind: 'sources', label: text(label) || 'Sources', items };
-            return [...leadOut, panel, ...after.map(x => x.lite)];
+            /* No items, no panel. An action list whose only <ul> belonged to a
+               nested container rendered as an empty navy bar carrying just its
+               heading, and a sources box with prose and no citations printed an
+               empty <ul> with its label below the prose that introduced it. */
+            const panel = items.length
+              ? [isAction
+                  ? { kind: 'action', heading, lead, items }
+                  : { kind: 'sources', label: text(label) || 'Sources', items }]
+              : [
+                  ...(isAction && heading ? [{ kind: 'h3', text: heading, html: '' }] : []),
+                  ...(!isAction && text(label) ? [{ kind: 'h3', text: text(label), html: '' }] : []),
+                  ...lead.map(html => ({ kind: 'p', html })),
+                ];
+            return [...leadOut, ...panel, ...after.map(x => x.lite)];
           }
-          if ([...el.children].some(c => BLOCK.has(c.tagName))) return blocksOf(el, onNavy);
+          // querySelector, not a direct-children check: <div><a><p>…</p></a></div>
+          // is valid HTML5 and used to emit an empty <a> where a paragraph was.
+          if (el.querySelector(BLOCK_SEL)) return blocksOf(el, onNavy);
           return text(el) ? [{ kind: 'p', html: inline(el, onNavy) }] : [];
         }
       }
@@ -752,6 +815,9 @@ function fitEmailHtml(prs, generatedOn, att) {
   return { html: buildEmailHtml(prs, generatedOn, att, 0), printedPaths: [] };
 }
 
+/** Visible characters an article's HTML should produce, for the packet check. */
+const plainLen = html => String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+
 function buildHtml(prs, generatedOn) {
   const totalArticles = prs.reduce((n, pr) => n + pr.articles.length, 0);
   const totalSkipped  = prs.reduce((n, pr) => n + (pr.skipped || []).length, 0);
@@ -785,7 +851,7 @@ function buildHtml(prs, generatedOn) {
   </section>`;
 
   const drafts = prs.map(pr => pr.articles.map((a, i) => `
-    <article class="draft">
+    <article class="draft" data-pr="${esc(pr.number)}" data-chars="${plainLen(a.bodyHtml)}">
       <header class="draft-hero">
         <span class="draft-origin">PR #${esc(pr.number)} &middot; draft ${i + 1} of ${pr.articles.length} &middot; <code>${esc(a.path)}</code></span>
         ${a.category ? `<span class="cat">${esc(a.category)}</span>` : ''}
@@ -978,6 +1044,7 @@ async function main() {
 
   // Set once the packet is confirmed to contain the drafts — see below.
   let packetOk = false;
+  let emptyPrs = new Set();
   const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const page = await browser.newPage();
   /* NO PAGE SCRIPTS, EVER. Stripping <script> inside page.evaluate is too late
@@ -1098,22 +1165,29 @@ async function main() {
       // contained <article class="draft"> inflated the count, failed the check
       // forever, and had the same email re-sent every week.
       const drafts = [...document.querySelectorAll('body > article.draft')];
-      return {
-        drafts: drafts.length,
-        // The DRAFT BODIES. Measuring document text let the cover and the notes
-        // panel clear the floor on their own, so an article rendered completely
-        // blank still counted as delivered.
-        empty: drafts.filter(d => {
-          const b = d.querySelector('.draft-body');
-          return !b || (b.innerText || '').trim().length < 120;
-        }).length,
-      };
+      const empty = [];
+      for (const d of drafts) {
+        const b = d.querySelector('.draft-body');
+        const got = b ? (b.innerText || '').trim().length : 0;
+        // Against what this article SHOULD produce, not a flat floor. A fixed
+        // 120 characters called a genuinely short draft empty — and because the
+        // verdict was run-wide, that one draft stripped every other pull
+        // request in the run of its lock and re-mailed them weekly, forever.
+        const want = Number(d.getAttribute('data-chars') || 0);
+        if (got < Math.max(20, want * 0.4)) empty.push(d.getAttribute('data-pr'));
+      }
+      // Per PULL REQUEST, so one bad draft costs only its own.
+      return { drafts: drafts.length, empty: [...new Set(empty)] };
     });
-    packetOk = shown.drafts === expected && shown.empty === 0;
-    if (!packetOk) {
-      console.log(`::warning::The packet rendered ${shown.drafts} of ${expected} drafts` +
-                  `${shown.empty ? `, ${shown.empty} of them empty` : ''}. It is still attached, ` +
-                  'but it is NOT counted as delivery, so the next run will rebuild and send again.');
+    emptyPrs = new Set(shown.empty);
+    packetOk = shown.drafts === expected;
+    if (!packetOk || emptyPrs.size) {
+      const short = emptyPrs.size
+        ? `; PR ${[...emptyPrs].map(n => '#' + n).join(', ')} came out much shorter than the source`
+        : '';
+      console.log(`::warning::The packet rendered ${shown.drafts} of ${expected} drafts${short}. ` +
+                  'It is still attached, but those drafts are NOT counted as delivery, so the ' +
+                  'next run will rebuild and send again.');
     }
 
     const printedPaths = new Set(await writeEmail(rendered, true));
@@ -1141,7 +1215,8 @@ async function main() {
       const key = (pr, a) => `${pr.number}:${a.path}`;
       const carried = rendered
         .filter(pr => pr.articles.length
-                   && (packetOk || pr.articles.every(a => printedPaths.has(key(pr, a)))))
+                   && ((packetOk && !emptyPrs.has(String(pr.number)))
+                       || pr.articles.every(a => printedPaths.has(key(pr, a)))))
         .map(pr => String(pr.number));
       await fs.writeFile(process.env.CARRIED_OUT, JSON.stringify(carried));
       console.log(`Delivered this week: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);
