@@ -138,6 +138,19 @@ async function extractArticle(page, html) {
     for (const el of body.querySelectorAll('style, script, link, meta, base, iframe, object, embed')) {
       el.remove();
     }
+    /* Attributes, not just elements. A single inline style can cover the whole
+       packet — `position:fixed;width:100%;height:100%;background:#fff` renders
+       every page blank — and `display:none` makes the packet and the email
+       disagree about what the article even says. Event handlers are inert with
+       scripting disabled, but they are stripped so the packet's HTML cannot
+       carry one into any future renderer. data-ledger-* is ours: an article
+       that spoofs it could delete its own content from the email. */
+    for (const el of body.querySelectorAll('*')) {
+      for (const attr of [...el.attributes]) {
+        const n = attr.name.toLowerCase();
+        if (n.startsWith('on') || n === 'style' || n.startsWith('data-ledger-')) el.removeAttribute(attr.name);
+      }
+    }
 
     for (const el of body.querySelectorAll('a[href]')) {
       try { el.setAttribute('href', new URL(el.getAttribute('href'), base).href); } catch { /* leave as-is */ }
@@ -183,30 +196,38 @@ async function extractArticle(page, html) {
        Descending was the original defect in two directions at once: it glued a
        3x3 rate table into "1120-SSep 15Sep 15", and — once a fallback was added
        to recover the block text — it emitted that text twice. */
-    const inline = (node, onNavy) => {
-      let out = '';
+    /* ONE node, rendered as itself. inline() below renders a node's CHILDREN,
+       which is what a caller wants for a <p>; flatten() wants the node itself,
+       and passing an <a> to inline() emitted its text and threw the tag away —
+       every citation in every sources box, every link and bold inside every
+       list item and table cell, reduced to plain text while the PDF kept them.
+       Word-for-word identical, so a text-only parity check never saw it. */
+    const inlineNode = (n, onNavy) => {
+      if (n.nodeType === 3) return escHtml(n.nodeValue);
+      if (n.nodeType !== 1 || BLOCK.has(n.tagName)) return '';
       const link   = onNavy ? P.GOLD_PILL : P.NAVY_900;
       const strong = onNavy ? P.CREAM     : P.NAVY_900;
       const mono   = onNavy ? P.CREAM     : P.SLATE;
-      for (const n of node.childNodes) {
-        if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
-        if (n.nodeType !== 1) continue;
-        if (BLOCK.has(n.tagName)) continue;
-        switch (n.tagName) {
-          case 'BR':     out += '<br />'; break;
-          case 'A':      out += `<a class="t-link" href="${escHtml(n.getAttribute('href') || '')}" style="color:${link};text-decoration:underline;">${inline(n, onNavy)}</a>`; break;
-          case 'STRONG':
-          case 'B':      out += `<strong class="t-strong" style="color:${strong};font-weight:700;">${inline(n, onNavy)}</strong>`; break;
-          case 'EM':
-          case 'I':      out += `<em>${inline(n, onNavy)}</em>`; break;
-          case 'CODE':   out += `<code style="font-family:Consolas,Menlo,monospace;font-size:13px;color:${mono};">${inline(n, onNavy)}</code>`; break;
-          case 'SUP':    out += `<sup>${inline(n, onNavy)}</sup>`; break;
-          case 'SUB':    out += `<sub>${inline(n, onNavy)}</sub>`; break;
-          case 'SCRIPT':
-          case 'STYLE':  break;
-          default:       out += inline(n, onNavy);   // span, and anything unexpected
-        }
+      switch (n.tagName) {
+        case 'BR':     return '<br />';
+        case 'A':      return `<a class="t-link" href="${escHtml(n.getAttribute('href') || '')}" style="color:${link};text-decoration:underline;">${inline(n, onNavy)}</a>`;
+        case 'STRONG':
+        case 'B':      return `<strong class="t-strong" style="color:${strong};font-weight:700;">${inline(n, onNavy)}</strong>`;
+        case 'EM':
+        case 'I':      return `<em>${inline(n, onNavy)}</em>`;
+        case 'CODE':   return `<code style="font-family:Consolas,Menlo,monospace;font-size:13px;color:${mono};">${inline(n, onNavy)}</code>`;
+        case 'SUP':    return `<sup>${inline(n, onNavy)}</sup>`;
+        case 'SUB':    return `<sub>${inline(n, onNavy)}</sub>`;
+        case 'SCRIPT':
+        case 'STYLE':  return '';
+        default:       return inline(n, onNavy);   // span, and anything unexpected
       }
+    };
+
+    /** A node's children, inline only. Block children are skipped, not walked. */
+    const inline = (node, onNavy) => {
+      let out = '';
+      for (const n of node.childNodes) out += inlineNode(n, onNavy);
       return out;
     };
 
@@ -220,7 +241,7 @@ async function extractArticle(page, html) {
         if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
         if (n.nodeType !== 1) continue;
         if (BLOCK.has(n.tagName)) add(flatten(n, onNavy));
-        else out += inline(n, onNavy);
+        else out += inlineNode(n, onNavy);
       }
       return out;
     };
@@ -235,17 +256,22 @@ async function extractArticle(page, html) {
 
     /** Clone `el` with exactly `nodes` removed — by identity, not by position. */
     const withoutNodes = (el, nodes) => {
-      const MARK = 'data-ledger-drop';
+      const MARK = 'data-ledger-drop';   // safe: data-ledger-* is stripped above
       nodes.forEach(n => n.setAttribute(MARK, '1'));
       const clone = el.cloneNode(true);
-      clone.querySelectorAll(`[${MARK}]`).forEach(n => n.remove());
+      // Replaced with a space, not removed. Deleting the node left the text on
+      // either side of it adjacent, so "<li>LEAD<table/>TAIL</li>" flattened to
+      // the single word "LEADTAIL".
+      clone.querySelectorAll(`[${MARK}]`)
+        .forEach(n => n.replaceWith(n.ownerDocument.createTextNode(' ')));
       nodes.forEach(n => n.removeAttribute(MARK));
       return clone;
     };
 
+    const CONTAINER_CLASS = ['callout', 'action-list', 'sources-box'];
+    const OWNED_SEL = 'ul, ol, table, pre, blockquote, dl, figure, .callout, .action-list, .sources-box';
     const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
-      el.classList.contains('callout') || el.classList.contains('action-list') ||
-      el.classList.contains('sources-box');
+      CONTAINER_CLASS.some(c => el.classList.contains(c));
 
     const cellsOf = tr => [...tr.children]
       .filter(c => c.tagName === 'TH' || c.tagName === 'TD')
@@ -265,11 +291,15 @@ async function extractArticle(page, html) {
         header: [...tr.children].some(c => c.tagName === 'TH'),
         cells: cellsOf(tr),
       })).filter(r => r.cells.length);
-      const cap = text(el.querySelector(':scope > caption'));
+      const capEl = el.querySelector(':scope > caption');
+      const cap = text(capEl);
       const out = [];
       if (cap) out.push({ kind: 'h3', text: cap });
-      if (rows.length) out.push({ kind: 'table', rows });
-      else if (text(el)) out.push({ kind: 'p', html: flatten(el, false) });
+      if (rows.length) { out.push({ kind: 'table', rows }); return out; }
+      // No rows is not no content — but the caption is already out, so the
+      // fallback must not print it a second time.
+      const rest = capEl ? withoutNodes(el, [capEl]) : el;
+      if (text(rest)) out.push({ kind: 'p', html: flatten(rest, false) });
       return out;
     };
 
@@ -280,9 +310,9 @@ async function extractArticle(page, html) {
       for (const c of el.children) {
         if (c.tagName === 'DT') {
           if (term) list.push({ html: bold(term), depth: 0 });   // term with no definition
-          term = inline(c, onNavy);
+          term = flatten(c, onNavy);
         } else if (c.tagName === 'DD') {
-          list.push({ html: term ? `${bold(term)} &mdash; ${inline(c, onNavy)}` : inline(c, onNavy), depth: 0 });
+          list.push({ html: term ? `${bold(term)} &mdash; ${flatten(c, onNavy)}` : flatten(c, onNavy), depth: 0 });
           term = '';
         }
       }
@@ -302,17 +332,19 @@ async function extractArticle(page, html) {
       };
       for (const li of list.children) {
         if (li.tagName !== 'LI') continue;
-        // The item's own text: everything except the lists and heavy blocks it
-        // contains, which are emitted in their own right below.
-        const clone = li.cloneNode(true);
-        clone.querySelectorAll('ul, ol, table, pre, blockquote, dl, figure').forEach(n => n.remove());
-        run.push({ html: flatten(clone, onNavy).trim(), depth });
+        /* In document order, and never the same node twice: a <table> inside a
+           <blockquote> inside this item belongs to the blockquote, and a nested
+           <ul> inside that blockquote likewise. The container classes are in
+           the list because a `.callout` inside an <li> owns its own contents —
+           stripping the lists and tables it holds while re-emitting only what
+           the <li> itself owned dropped a whole rate table on the floor. */
+        const owned = ownedBy(li, OWNED_SEL, p => p !== li && isContainer(p));
 
-        // In document order, and never the same node twice: a <table> inside a
-        // <blockquote> inside this item belongs to the blockquote, and a nested
-        // <ul> inside that blockquote likewise.
-        const owned = ownedBy(li, 'ul, ol, table, pre, blockquote, dl, figure',
-                              p => p !== li && isContainer(p));
+        // The item's own text: everything except what it owns, which is
+        // emitted in its own right below.
+        const html = flatten(withoutNodes(li, owned), onNavy).trim();
+        // An <li> whose only content is a table used to emit a blank bullet.
+        if (html) run.push({ html, depth });
         for (const node of owned) {
           if (node.tagName === 'UL' || node.tagName === 'OL') {
             for (const b of listBlocks(node, onNavy, depth + 1)) {
@@ -373,52 +405,92 @@ async function extractArticle(page, html) {
             const blocks = blocksOf(clone, onNavy);
             return blocks.length ? [{ kind: 'callout', label: text(label), blocks }] : [];
           }
-          if (cls.contains('action-list')) {
-            // Lists belonging to a NESTED callout or sources box are that box's,
-            // not this checklist's. Adopting them printed a source URL as an
-            // action step and left the nested box rendering as an empty navy bar.
-            const lists = ownedBy(el, 'ul, ol', p => isContainer(p));
-            const blocks = lists.flatMap(l => listBlocks(l, true, 0));
-            const items = blocks.flatMap(b => (b.kind === 'list' ? b.items : []));
-            const heavyInLists = blocks.filter(b => b.kind !== 'list');
+          if (cls.contains('action-list') || cls.contains('sources-box')) {
+            const isAction = cls.contains('action-list');
+            /* Lists belonging to a NESTED callout or sources box are that box's,
+               not this panel's. Adopting them printed a source URL as an action
+               step with a checkmark and left the nested box rendering as an
+               empty navy bar. */
+            const lists = ownedBy(el, 'ul, ol',
+                                  p => isContainer(p) || p.classList.contains('label'));
+            const listSet = new Set(lists);
+            const label = isAction ? null : el.querySelector('.label');
 
-            // Everything that is not one of those lists, in document order.
-            // Marked before cloning and removed by mark: removing by INDEX
-            // assumed the clone's list order matched the owned subset, and a
-            // nested callout's <ul> shifts every index — so the checklist's own
-            // list survived (rendered twice) and the callout's was deleted.
-            const clone = withoutNodes(el, lists);
-            const heads = [...clone.querySelectorAll('h1, h2, h3, h4, h5, h6')];
-            const heading = text(heads[0] || null);
-            if (heads[0]) heads[0].remove();
-            // On the navy ground for prose, on the light ground for anything
-            // that leaves the navy block — a callout computed for navy and then
-            // rendered on cream put #F5F0E8 text on an #F5F0E8 background.
-            const onNavyBlocks = blocksOf(clone, true);
-            const onLightBlocks = blocksOf(clone, false);
-            const lead = [];
-            const after = [];
-            onNavyBlocks.forEach((b, i) => {
-              if (b.kind === 'p' || b.kind === 'disclaimer') lead.push(b.html);
+            /* Walk the children IN ORDER and split at the first list. Collecting
+               every paragraph into `lead` regardless of where it sat printed
+               trailing prose above the checklist, and a table that introduced
+               the steps below them. */
+            const before = [], after = [], items = [];
+            let seenList = false;
+            let heading = '';
+            const sink = () => (seenList ? after : before);
+            for (const node of el.childNodes) {
+              if (node.nodeType === 3) {
+                const t = node.nodeValue.trim();
+                if (t) sink().push({ kind: 'p', html: escHtml(t) });
+                continue;
+              }
+              if (node.nodeType !== 1) continue;
+              const mine = lists.filter(l => l === node || node.contains(l));
+              if (mine.length) {
+                for (const l of mine) {
+                  for (const b of listBlocks(l, isAction, 0)) {
+                    if (b.kind === 'list') items.push(...b.items);
+                    else after.push(b);
+                  }
+                }
+                seenList = true;
+                // A wrapper around the list may carry prose of its own.
+                if (!listSet.has(node)) {
+                  for (const b of blocksOf(withoutNodes(node, mine), isAction)) sink().push(b);
+                }
+                continue;
+              }
+              if (label && (node === label || node.contains(label))) {
+                if (node !== label) for (const b of blocksOf(withoutNodes(node, [label]), false)) sink().push(b);
+                continue;
+              }
+              if (isAction && !heading && /^H[1-6]$/.test(node.tagName)) { heading = text(node); continue; }
+              for (const b of blocksOfNode(node, isAction)) sink().push(b);
+            }
+
+            /* Prose stays on the panel's ground; anything else leaves it. A
+               callout computed for navy and then rendered on cream put #F5F0E8
+               text on an #F5F0E8 background — the inverse of the bug the onNavy
+               flag exists to prevent — so what leaves is recomputed for light. */
+            // Only the action panel has a `lead` slot. Folding a sources box's
+            // prose into one dropped it: the panel renders label and citations
+            // and nothing else. For that panel everything stays a real block.
+            const lead = [], leadOut = [];
+            for (const b of before) {
+              if (!isAction) leadOut.push(b);
+              else if (b.kind === 'p' || b.kind === 'disclaimer') lead.push(b.html);
               else if (b.kind === 'h2' || b.kind === 'h3') lead.push(`<strong>${escHtml(b.text)}</strong>`);
-              else after.push(onLightBlocks[i] || b);
-            });
-            return [{ kind: 'action', heading, lead, items }, ...heavyInLists, ...after];
-          }
-          if (cls.contains('sources-box')) {
-            const label = el.querySelector('.label');
-            const lists = ownedBy(el, 'ul, ol', p => isContainer(p) || p.classList.contains('label'));
-            const items = lists.flatMap(l => listBlocks(l, false, 0))
-                               .flatMap(b => (b.kind === 'list' ? b.items : []));
-            const clone = withoutNodes(el, lists);
-            const labels = [...clone.querySelectorAll('.label')];
-            if (label && labels.length) labels[0].remove();
-            return [{ kind: 'sources', label: text(label) || 'Sources', items }, ...blocksOf(clone, false)];
+              else leadOut.push(b);
+            }
+            const relight = bs => (isAction ? bs.map(b => relightBlock(b)) : bs);
+            const panel = isAction
+              ? { kind: 'action', heading, lead, items }
+              : { kind: 'sources', label: text(label) || 'Sources', items };
+            return [...relight(leadOut), panel, ...relight(after)];
           }
           if ([...el.children].some(c => BLOCK.has(c.tagName))) return blocksOf(el, onNavy);
           return text(el) ? [{ kind: 'p', html: inline(el, onNavy) }] : [];
         }
       }
+    };
+
+    /** Re-colour a block that was computed for navy but is leaving the panel. */
+    const relightBlock = (b) => {
+      const swap = h => String(h)
+        .split(P.GOLD_PILL).join(P.NAVY_900)
+        .split(`color:${P.CREAM}`).join(`color:${P.NAVY_900}`);
+      const out = { ...b };
+      if (out.html) out.html = swap(out.html);
+      if (out.items) out.items = out.items.map(i => (typeof i === 'string' ? swap(i) : { ...i, html: swap(i.html) }));
+      if (out.blocks) out.blocks = out.blocks.map(relightBlock);
+      if (out.rows) out.rows = out.rows.map(r => ({ ...r, cells: r.cells.map(c => ({ ...c, html: swap(c.html) })) }));
+      return out;
     };
 
     const blocksOf = (root, onNavy = false) => {
@@ -433,13 +505,18 @@ async function extractArticle(page, html) {
       for (const node of root.childNodes) {
         if (node.nodeType === 3) { buf += escHtml(node.nodeValue); continue; }
         if (node.nodeType !== 1) continue;
-        if (!BLOCK.has(node.tagName)) { buf += inline(node, onNavy); continue; }
+        if (!BLOCK.has(node.tagName)) { buf += inlineNode(node, onNavy); continue; }
         flush();
         out.push(...blocksOfNode(node, onNavy));
       }
       flush();
       return out;
     };
+
+    // Taken BEFORE the walk, on purpose: the walk marks live nodes with a
+    // temporary attribute while cloning, and reading innerHTML afterwards
+    // would carry those marks into the packet.
+    const bodyHtml = body.innerHTML;
 
     return {
       title:    txt('h1') || document.title.replace(/\s*\|.*$/, ''),
@@ -448,7 +525,7 @@ async function extractArticle(page, html) {
       date:     txt('time', meta || document),
       dateIso:  (meta && meta.querySelector('time') && meta.querySelector('time').getAttribute('datetime')) || '',
       readTime: extra.join(' · '),
-      bodyHtml: body.innerHTML,
+      bodyHtml,
       blocks:   blocksOf(body),
     };
   }, SITE, { NAVY_900: C.NAVY_900, GOLD_PILL: C.GOLD_PILL, CREAM: C.CREAM, SLATE: C.SLATE });
@@ -867,8 +944,19 @@ async function main() {
   };
   await writeEmail(withAge(prs).map(pr => ({ ...pr, articles: [] })), false);
 
+  // Set once the packet is confirmed to contain the drafts — see below.
+  let packetOk = false;
   const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const page = await browser.newPage();
+  /* NO PAGE SCRIPTS, EVER. Stripping <script> inside page.evaluate is too late
+     — the parser has already run it. An article carrying
+     `<img src=x onerror="document.querySelectorAll('.draft-body').forEach(e=>e.remove())">`
+     produced a 34 KB PDF with no cover, no hero and no article body, exit 0,
+     and the draft recorded as delivered; one that patched Element.cloneNode
+     made the email silently drop every list and callout the packet kept.
+     Disabling execution stops both at the door. page.evaluate is unaffected —
+     it runs through the Runtime domain, not the page's own script context. */
+  await page.setJavaScriptEnabled(false);
   const rendered = [];
 
   try {
@@ -961,7 +1049,23 @@ async function main() {
     const { size } = await fs.stat(OUT);
     console.log(`Wrote ${OUT} (${Math.round(size / 1024)} KB)`);
 
-    const hasPdfOnDisk = true;   // this line is only reached once the PDF is renamed into place
+    /* Did the packet actually come out with the drafts in it? `fs.rename`
+       succeeding only proves a file exists. A blank-but-non-empty PDF passed
+       the workflow's `[ -s ]` check, was attached, was described as "each draft
+       laid out as it will read on the site", and — because the PDF counts as
+       delivery — took the week's lock so nothing retried. */
+    const expected = rendered.reduce((n, pr) => n + pr.articles.length, 0);
+    const shown = await page.evaluate(() => ({
+      drafts: document.querySelectorAll('article.draft').length,
+      chars: (document.body.innerText || '').trim().length,
+    }));
+    packetOk = shown.drafts === expected && shown.chars > 500;
+    if (!packetOk) {
+      console.log(`::warning::The packet rendered ${shown.drafts} of ${expected} drafts and ` +
+                  `${shown.chars} characters. It is still attached, but it is NOT counted as ` +
+                  'delivery, so the next run will rebuild and send again.');
+    }
+
     const printedPaths = new Set(await writeEmail(rendered, true));
     if (process.env.EMAIL_HTML_OUT) console.log(`Wrote ${process.env.EMAIL_HTML_OUT}`);
 
@@ -987,7 +1091,7 @@ async function main() {
       const key = (pr, a) => `${pr.number}:${a.path}`;
       const carried = rendered
         .filter(pr => pr.articles.length
-                   && (hasPdfOnDisk || pr.articles.every(a => printedPaths.has(key(pr, a)))))
+                   && (packetOk || pr.articles.every(a => printedPaths.has(key(pr, a)))))
         .map(pr => String(pr.number));
       await fs.writeFile(process.env.CARRIED_OUT, JSON.stringify(carried));
       console.log(`Delivered this week: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);

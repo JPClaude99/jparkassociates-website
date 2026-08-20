@@ -61,8 +61,16 @@ def strip_expressions(script):
                 if depth == 0:
                     break
             j += 1
+        if j >= len(script):
+            # Unbalanced. Consuming to end-of-string replaced the whole rest of
+            # the script with one token, so genuine bash errors after a typo'd
+            # expression were never seen — the linter said ALL OK on a step with
+            # two unterminated quotes. Treat the marker as literal and move on.
+            out.append(script[start:start + 3])
+            i = start + 3
+            continue
         out.append('X')
-        i = j + 1 if j < len(script) else len(script)
+        i = j + 1
     return ''.join(out)
 
 
@@ -116,7 +124,8 @@ def main():
             # most worth checking.
             # basename, so `shell: /bin/bash -e {0}` is still checked rather
             # than silently skipped as an unknown shell.
-            name = os.path.basename(shell.split()[0]) if shell else ''
+            parts = shell.split() if isinstance(shell, str) else []
+            name = os.path.basename(parts[0]) if parts else ''
             if name not in SHELLS_WE_CHECK:
                 continue
             # GitHub substitutes ${{ }} before bash sees the script. Replace each
