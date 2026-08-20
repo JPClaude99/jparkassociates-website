@@ -6,6 +6,12 @@ name: Ledger draft alert
 # deploys the article to jparkassociates.com, so an unmerged Ledger PR is
 # exactly "a draft is ready but not live."
 #
+# The email carries a PDF review packet built by automation/ledger-draft-pdf.mjs:
+# each drafted article rendered as it will read on the site, and after each one a
+# REVIEWER NOTES panel (cream ground, sans headings — deliberately not article
+# styling) holding that article's section of the PR body. Confidence notes, "also
+# noticed" and "upcoming" land in a RUN NOTES panel at the end.
+#
 # Why this is failproof (no dependence on any running Claude session):
 #   • schedule            — checks every day and RE-emails as long as a draft
 #                           sits unmerged, so one missed email is never fatal.
@@ -14,6 +20,8 @@ name: Ledger draft alert
 #   • If the SMTP secrets below are missing/wrong, the email step FAILS, which
 #     makes GitHub email the repo admin about the failed run — so you are
 #     alerted even when the alerting itself is misconfigured.
+#   • If the PDF cannot be built the email still goes out, saying so in the body.
+#     Losing the packet must never cost you the alert.
 #
 # ── One-time setup (≈3 minutes) ────────────────────────────────────────────
 # Add two repository secrets under:
@@ -21,8 +29,12 @@ name: Ledger draft alert
 #     LEDGER_ALERT_SMTP_USER   a Gmail / Google Workspace address to send FROM
 #     LEDGER_ALERT_SMTP_PASS   a Google App Password for that address
 # Create the App Password at myaccount.google.com → Security → 2-Step
-# Verification → App passwords. (Workspace accounts: an admin may first need to
-# allow app passwords for the org.) The "to" address is set below.
+# Verification → App passwords, and store it as the 16 characters with NO
+# SPACES — Google displays it in four groups, and pasting the spaces is the
+# usual cause of "535-5.7.8 Username and Password not accepted".
+# (Workspace accounts: an admin may first need to allow app passwords for the
+# org.) LEDGER_ALERT_SMTP_USER must be the mailbox the App Password belongs to,
+# not an alias. The "to" address is set below.
 # ───────────────────────────────────────────────────────────────────────────
 
 on:
@@ -39,12 +51,16 @@ permissions:
 jobs:
   ledger-draft-alert:
     runs-on: ubuntu-latest
+
     steps:
       - name: Find open, unmerged Ledger drafts
         id: find
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
+        env:
+          DRAFTS_JSON: ${{ runner.temp }}/drafts.json
         with:
           script: |
+            const fs = require('fs');
             const prs = await github.paginate(github.rest.pulls.list, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -66,15 +82,55 @@ jobs:
             core.setOutput('subject', drafts.length === 1
               ? `Ledger draft awaiting publish: ${drafts[0].title}`
               : `${drafts.length} Ledger drafts awaiting publish`);
+            // Hand the PDF builder what it needs. Written to a file rather than a
+            // step output: PR bodies are long and contain arbitrary markdown.
+            fs.writeFileSync(process.env.DRAFTS_JSON, JSON.stringify(drafts.map(p => ({
+              number: p.number,
+              title: p.title,
+              html_url: p.html_url,
+              body: p.body,
+              head: { sha: p.head.sha, ref: p.head.ref },
+              created_at: p.created_at,
+            }))));
             if (drafts.length) {
               core.notice(`Ledger drafts open and unmerged: ${drafts.map(p => '#' + p.number).join(', ')}`);
             } else {
               core.info('No open Ledger drafts — nothing to alert.');
             }
 
+      - name: Check out the PDF builder
+        if: steps.find.outputs.count != '0'
+        uses: actions/checkout@v6
+        with:
+          # Always the default branch's builder — this workflow also runs on
+          # `pull_request`, and a PR must not get to run its own version of it.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Set up Node
+        if: steps.find.outputs.count != '0'
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Build the draft review PDF
+        id: pdf
+        if: steps.find.outputs.count != '0'
+        continue-on-error: true      # the alert matters more than the attachment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRAFTS_JSON: ${{ runner.temp }}/drafts.json
+          OUT_PATH: ${{ runner.temp }}/ledger-drafts.pdf
+        run: |
+          npm install --no-save --no-audit --no-fund puppeteer@25 marked@18
+          node automation/ledger-draft-pdf.mjs
+
+      - name: Note a failed PDF build
+        if: steps.find.outputs.count != '0' && steps.pdf.outcome == 'failure'
+        run: echo "::warning::Draft review PDF could not be built; sending the alert without it."
+
       - name: Email the alert
         if: steps.find.outputs.count != '0'
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v18
         with:
           server_address: smtp.gmail.com
           server_port: 465
@@ -84,11 +140,16 @@ jobs:
           from: Ledger Bot <${{ secrets.LEDGER_ALERT_SMTP_USER }}>
           to: jasonpark@jparkassociates.com
           subject: ${{ steps.find.outputs.subject }}
+          attachments: ${{ steps.pdf.outcome == 'success' && format('{0}/ledger-drafts.pdf', runner.temp) || '' }}
           body: |
             A Ledger article is drafted but not yet live on jparkassociates.com.
             Merging its pull request is what publishes it.
 
             ${{ steps.find.outputs.body }}
+
+            ${{ steps.pdf.outcome == 'success'
+                && 'Attached: ledger-drafts.pdf — each draft as it will read on the site, with reviewer notes after it.'
+                || 'The PDF review packet could not be built this run; see the Actions log. Review the pull request directly.' }}
 
             —
             Automated daily check (.github/workflows/ledger-draft-alert.yml).
