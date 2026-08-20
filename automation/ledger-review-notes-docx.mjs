@@ -32,7 +32,7 @@ import fs from 'node:fs/promises';
 import {
   Document, Packer, Paragraph, TextRun, ExternalHyperlink, AlignmentType,
   BorderStyle, Table, TableRow, TableCell, WidthType, ShadingType,
-  Header, Footer, PageNumber,
+  Header, Footer, PageNumber, Tab,
 } from 'docx';
 import { parseNotes, ageLabel, generatedOn } from './ledger-notes.mjs';
 
@@ -108,6 +108,31 @@ async function prArticleFiles(number) {
     .map(f => xmlSafe(f.filename));
 }
 
+/* The email and the packet read titles with textContent, which resolves EVERY
+   entity. A hand-written shortlist did not: a shipped article whose <h1> holds
+   &ldquo;handled&rdquo; reached the Word note as literal &ldquo; and &rdquo;
+   while the other two artifacts printed curly quotes — the same draft under two
+   different names again. Numeric and hex forms included. */
+const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ensp: ' ', emsp: ' ',
+  thinsp: ' ', shy: '', lsquo: '\u2018', rsquo: '\u2019', sbquo: '\u201a',
+  ldquo: '\u201c', rdquo: '\u201d', bdquo: '\u201e', ndash: '\u2013', mdash: '\u2014',
+  hellip: '\u2026', middot: '\u00b7', bull: '\u2022', dagger: '\u2020', prime: '\u2032',
+  laquo: '\u00ab', raquo: '\u00bb', deg: '\u00b0', plusmn: '\u00b1', times: '\u00d7',
+  divide: '\u00f7', frac12: '\u00bd', frac14: '\u00bc', frac34: '\u00be',
+  copy: '\u00a9', reg: '\u00ae', trade: '\u2122', euro: '\u20ac', pound: '\u00a3',
+  yen: '\u00a5', cent: '\u00a2', sect: '\u00a7', para: '\u00b6', dollar: '$' };
+const decodeEntities = t => String(t).replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (m, g) => {
+  if (g[0] === '#') {
+    const n = g[1] === 'x' || g[1] === 'X' ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10);
+    // Out of range, or a lone surrogate: leave the source text alone rather
+    // than manufacturing a code point that xmlSafe would then have to strip.
+    return Number.isFinite(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff)
+      ? String.fromCodePoint(n) : m;
+  }
+  const v = NAMED[g.toLowerCase()];
+  return v === undefined ? m : v;
+});
+
 /* The article's OWN <h1>, which is what the email and the PDF packet call it.
    Titling the draft from the pull-request body heading instead meant one run
    produced three artifacts naming the same draft two different things —
@@ -130,10 +155,7 @@ async function articleTitle(path, ref) {
     const html = await res.text();
     const m = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
     if (!m) return '';
-    const t = m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
-                  .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&rsquo;/g, '\u2019')
-                  .replace(/&nbsp;/g, ' ').replace(/&mdash;/g, '\u2014').replace(/\s+/g, ' ').trim();
-    return xmlSafe(t);
+    return xmlSafe(decodeEntities(m[1].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim());
   } catch { return ''; }
 }
 
@@ -144,7 +166,7 @@ async function articleTitle(path, ref) {
  * inline code and links, including bold inside a link. Anything unrecognised
  * stays literal text — a stray asterisk must never eat the rest of a sentence.
  */
-function runs(md, base = {}, depth = 0) {
+function runs(md, base = {}, depth = 0, inLink = false) {
   /* Every emphasis branch recurses now, so the "cannot recurse more than once"
      that used to hold for link text no longer does. Each step strictly shortens
      the string, so this terminates on its own; the cap is a backstop against a
@@ -172,6 +194,10 @@ function runs(md, base = {}, depth = 0) {
     // Double-backtick first: a span written ``a ` b`` holds a literal
     // backtick, and the single-backtick branch closed on it and
     // mis-delimited the rest of the line into monospace.
+    // Backslash escapes come FIRST, or \*not bold\* has its asterisks eaten by
+    // the emphasis branches and the backslashes printed instead — the exact
+    // inversion of what the author asked for.
+    '\\\\(?<esc>[\\\\`*_{}\\[\\]()#+\\-.!~|<>&\"\'])',
     '``(?<code2>(?:[^`]|`(?!`))+)``',
     '`(?<code>[^`]+)`',
     // Link text may itself contain balanced brackets — "[Form 1099-NEC
@@ -181,6 +207,13 @@ function runs(md, base = {}, depth = 0) {
     // A bare CommonMark autolink. The PDF renders it as a live link; the
     // Word note printed the angle brackets and no hyperlink at all.
     '<(?<auto>https?://[^>\\s]+)>',
+    // GFM strikethrough. `marked` renders <del>; this printed the tildes.
+    '~~(?<del>[^~]+)~~',
+    /* A BARE url, which is how a source gets pasted into a pull-request body
+       more often than not, and which the packet turns into a live link. The
+       trailing-punctuation trim keeps a sentence's full stop out of the target.
+       Last in the alternation so an explicit [text](url) still wins. */
+    '(?<bare>https?://[^\\s<>()\\[\\]]+(?:\\([^\\s()]*\\)[^\\s<>()\\[\\]]*)*)',
   ].join('|'), 'gs');
   let last = 0, m;
   const lit = t => { if (t) out.push(new TextRun({ text: t, font: SANS, size: pt(10), color: SLATE, ...base })); };
@@ -198,12 +231,16 @@ function runs(md, base = {}, depth = 0) {
        to the source. Emphasis nested inside emphasis was flattened the same
        way. Every branch now recurses, with its own styling folded into `base`
        so the inner runs inherit it. */
-    if (g.bi !== undefined) {
-      out.push(...runs(g.bi, { ...base, bold: true, italics: true }, depth + 1));
+    if (g.esc !== undefined) {
+      lit(g.esc);
+    } else if (g.del !== undefined) {
+      out.push(...runs(g.del, { ...base, strike: true }, depth + 1, inLink));
+    } else if (g.bi !== undefined) {
+      out.push(...runs(g.bi, { ...base, bold: true, italics: true }, depth + 1, inLink));
     } else if (bold !== undefined) {
-      out.push(...runs(bold, { ...base, bold: true, color: NAVY_900 }, depth + 1));
+      out.push(...runs(bold, { ...base, bold: true, color: NAVY_900 }, depth + 1, inLink));
     } else if (ital !== undefined) {
-      out.push(...runs(ital, { ...base, italics: true }, depth + 1));
+      out.push(...runs(ital, { ...base, italics: true }, depth + 1, inLink));
     } else if (g.code !== undefined || g.code2 !== undefined) {
       // color AFTER the spread: inside a bold run `base.color` is navy-900, and
       // spreading it last repainted code spans with it.
@@ -214,12 +251,35 @@ function runs(md, base = {}, depth = 0) {
       const codeText = /^ [\s\S]* $/.test(raw) && raw.trim() ? raw.slice(1, -1) : raw;
       out.push(new TextRun({ text: codeText, font: 'Consolas', size: pt(9.5), ...base, color: NAVY_700 }));
     } else {
+      if (g.bare !== undefined) {
+        // Trailing sentence punctuation is not part of the URL.
+        const m2 = g.bare.match(/^(.*?)([.,;:!?]*)$/s);
+        const target = m2[1], tail = m2[2];
+        out.push(inLink
+          ? new TextRun({ text: target, font: SANS, size: pt(10), ...base,
+                          color: NAVY_700, underline: { type: 'single', color: NAVY_700 } })
+          : new ExternalHyperlink({ link: target, children: [new TextRun({
+              text: target, font: SANS, size: pt(10), ...base,
+              color: NAVY_700, underline: { type: 'single', color: NAVY_700 } })] }));
+        if (tail) lit(tail);
+        continue;
+      }
+      const linkRun = (text, url) => new TextRun({
+        text, font: SANS, size: pt(10), ...base,
+        color: NAVY_700, underline: { type: 'single', color: NAVY_700 },
+      });
+      /* A HYPERLINK INSIDE A HYPERLINK IS NOT A THING WORD CAN OPEN. docx only
+         converts an ExternalHyperlink at the paragraph level, so one nested in
+         another serialized as a bare <w:externalHyperlink/> — an element that
+         does not exist in ECMA-376 — and took its own text with it: the inner
+         words and URL were simply gone from the document. The outer link wins,
+         which is what a reader can actually click; the inner one keeps its text
+         and its underline and stops being a relationship. */
       if (g.auto !== undefined) {
         // A bare autolink: the text and the target are the same string.
-        out.push(new ExternalHyperlink({
+        out.push(inLink ? linkRun(g.auto, g.auto) : new ExternalHyperlink({
           link: g.auto,
-          children: [new TextRun({ text: g.auto, font: SANS, size: pt(10), ...base,
-                                   color: NAVY_700, underline: { type: 'single', color: NAVY_700 } })],
+          children: [linkRun(g.auto, g.auto)],
         }));
         continue;
       }
@@ -231,35 +291,57 @@ function runs(md, base = {}, depth = 0) {
       // CommonMark lets a destination be wrapped in angle brackets — the form
       // the scan agent reaches for when a URL has a query string. Kept literal,
       // the link target became "&lt;https://...&gt;" and was simply dead.
-      const url = g.url.replace(/^<(.*)>$/s, '$1');
-      out.push(new ExternalHyperlink({
-        link: url,
-        children: g.text ? runs(g.text, style, depth + 1)
-                         : [new TextRun({ text: url, font: SANS, size: pt(10), ...style })],
-      }));
+      const url = g.url.replace(/^<(.*)>$/s, '$1').trim();
+      const kids = g.text ? runs(g.text, style, depth + 1, true)
+                          : [new TextRun({ text: url || g.text || '', font: SANS, size: pt(10), ...style })];
+      // An empty destination — [text](<>) — would become an external
+      // relationship with Target="", a dead link Word may object to.
+      if (!url || inLink) out.push(...kids);
+      else out.push(new ExternalHyperlink({ link: url, children: kids }));
     }
   }
   lit(md.slice(last));
   return out.length ? out : [new TextRun({ text: '', font: SANS, size: pt(10) })];
 }
 
-const noteHeading = (text, level) => new Paragraph({
+/* `md` goes through runs() so a heading can hold a link, code or emphasis —
+   the packet renders all three and this printed the raw markdown, hyperlink
+   included, with no relationship in the document at all. The heading's own
+   styling is the `base`, so the inline runs inherit it. */
+const noteHeading = (md, level) => new Paragraph({
   keepNext: true,
   spacing: { before: level === 3 ? 200 : 160, after: 80 },
-  children: [new TextRun({
-    text, font: SANS, bold: true, color: NAVY_900,
+  children: runs(String(md ?? ''), {
+    font: SANS, bold: true, color: NAVY_900,
     size: level === 3 ? pt(11) : pt(10.5),
-  })],
+  }),
 });
 
 /* `instance` is what makes two ordered lists two lists. With a single instance
    Word continues one sequence through the whole document, so the "After
    merging" list under article 2 came out 3. 4. rather than 1. 2. — and kept
    climbing for every list in every draft. */
-const bullet = (md, ordered, level, instance = 0) => new Paragraph({
+/* A list that starts at 1 is a real Word numbered list. One that does not is
+   written out by hand.
+
+   docx exposes `instance` — which is what gives each list its own sequence —
+   but no way to set that instance's startOverride, so an ol starting at 5 was
+   silently renumbered 1, 2, 3 while the packet printed 5, 6, 7. "Confirm the
+   FTB date, step 5" then named a different step in each artifact. Word list
+   semantics are worth less than the two documents agreeing, so these carry the
+   number as text at the same indent and hang. */
+const bullet = (md, ordered, level, instance = 0, n = null) => new Paragraph({
   spacing: { after: 60 },
-  ...(ordered ? { numbering: { reference: 'ledger-ol', level, instance } } : { bullet: { level } }),
-  children: runs(md),
+  ...(ordered && n !== null
+    ? { indent: { left: 720 + level * 360, hanging: 360 } }
+    : ordered ? { numbering: { reference: 'ledger-ol', level, instance } }
+              : { bullet: { level } }),
+  children: [
+    ...(ordered && n !== null
+      ? [new TextRun({ text: `${n}.`, font: SANS, size: pt(10), color: SLATE }), new TextRun({ children: [new Tab()] })]
+      : []),
+    ...runs(md),
+  ],
 });
 
 /** A markdown table -> a bordered Word table. Alignment rows are dropped. */
@@ -301,7 +383,7 @@ function mdBlocks(md) {
   const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
   const out = [];
   let para = [];
-  let inOl = false;
+  let inOl = false, olNext = null;
 
   const flush = () => {
     if (!para.length) return;
@@ -312,6 +394,15 @@ function mdBlocks(md) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const t = line.trim();
+    /* Any non-blank line that is NOT a list item ends the run — a heading, a
+       rule, a table, a fence, a blockquote, a paragraph. A blank one does not:
+       a loose list is still one list, and restarting there would put two "1."s
+       in what the reader sees as one sequence. This has to be at the TOP of the
+       loop: sitting further down, every branch that `continue`s — heading,
+       setext, rule, table, fence — skipped it, so two ordered lists separated
+       by a "### After merging" heading still shared one numbering instance and
+       the second list started at 3. */
+    if (t && !/^(\s*)([-*+]|\d+[.)])\s+/.test(line)) inOl = false;
 
     // A fenced block is verbatim. Without this, `# comment` inside a code
     // sample became a heading and `- item` became a bullet, and the fence
@@ -379,19 +470,20 @@ function mdBlocks(md) {
     }
 
     const li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
-    // Any non-blank line that is NOT a list item ends the run. A blank one does
-    // not — a loose list is still one list, and restarting it there would put
-    // two "1."s in what the reader sees as a single sequence.
-    if (!li && t) inOl = false;
     if (li) {
       flush();
       const level = Math.min(2, Math.floor(li[1].replace(/\t/g, '  ').length / 2));
       const ordered = /\d/.test(li[2]);
       // A new numbering instance whenever an ordered list STARTS — that is,
       // when this ordered item does not directly follow another one.
-      if (ordered && !inOl) olInstance++;
+      if (ordered && !inOl) {
+        olInstance++;
+        const first = parseInt(li[2], 10);
+        olNext = Number.isFinite(first) && first !== 1 ? first : null;
+      }
       inOl = ordered;
-      out.push(bullet(li[3], ordered, level, olInstance));
+      out.push(bullet(li[3], ordered, level, olInstance, olNext));
+      if (olNext !== null && ordered && !level) olNext++;
       continue;
     }
 

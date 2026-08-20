@@ -234,7 +234,13 @@ async function extractArticle(page, html) {
                            // flatten() appended them verbatim and a list inside a
                            // table cell came out "CELLA first itemCELLB second
                            // item" — two bullets welded into one nonsense word.
-                           'LI', 'DT', 'DD']);
+                           'LI', 'DT', 'DD',
+                           // And the table's own anatomy. A <table> nested in a
+                           // <dd> or in another cell reaches flatten(), not
+                           // tableBlock(), and without these it came out
+                           // "PaydayDeposit byWed-FriFollowing Wednesday" —
+                           // the exact welding the walker exists to prevent.
+                           'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TD', 'TH', 'CAPTION']);
     // Blocks that become their own email block wherever they are found. Kept
     // apart from BLOCK because a <div> is a wrapper to walk through, while a
     // <table> is a thing to render.
@@ -251,9 +257,19 @@ async function extractArticle(page, html) {
        every citation in every sources box, every link and bold inside every
        list item and table cell, reduced to plain text while the PDF kept them.
        Word-for-word identical, so a text-only parity check never saw it. */
-    const inlineNode = (n, onNavy) => {
+    const inlineNode = (n, onNavy, skipDir = false) => {
       if (n.nodeType === 3) return escHtml(n.nodeValue);
       if (n.nodeType !== 1 || BLOCK.has(n.tagName)) return '';
+      /* `dir` is in KEEP_ATTR, so the packet reverses the run and the email,
+         which rebuilds every tag without attributes, did not: the same cell
+         printed "941 (Q3), amended" in one artifact and "amended ,)Q3( 941" in
+         the other. <bdo> handles itself below; everything else is wrapped. */
+      if (!skipDir && n.tagName !== 'BDO' && n.hasAttribute && n.hasAttribute('dir')) {
+        const d = String(n.getAttribute('dir')).toLowerCase();
+        if (d === 'rtl' || d === 'ltr' || d === 'auto') {
+          return `<span dir="${d}">${inlineNode(n, onNavy, true)}</span>`;
+        }
+      }
       const link   = onNavy ? P.GOLD_PILL : P.NAVY_900;
       const strong = onNavy ? P.CREAM     : P.NAVY_900;
       const mono   = onNavy ? P.CREAM     : P.SLATE;
@@ -281,10 +297,26 @@ async function extractArticle(page, html) {
         case 'STRIKE': return `<s style="text-decoration:line-through;">${inline(n, onNavy)}</s>`;
         case 'INS':
         case 'U':      return `<u style="text-decoration:underline;">${inline(n, onNavy)}</u>`;
-        // Both colours stated, so a client that flips the ground cannot leave
-        // navy type on a navy highlight.
-        case 'MARK':   return `<span style="background-color:${P.GOLD_PILL};color:${P.NAVY_900};padding:0 2px;">${inline(n, onNavy)}</span>`;
-        case 'Q':      return `&ldquo;${inline(n, onNavy)}&rdquo;`;
+        /* A REAL <mark>, so the stylesheet can reach its children. Painting an
+           opaque gold ground and leaving the children's own colour classes
+           alone made the text vanish: a link inside a highlight on the navy
+           panel is gold-on-gold at 1.00:1 — an empty rectangle where a form
+           name and its IRS link should be — and in dark mode .t-strong and
+           .t-link flip to cream over the same gold at 1.19:1. Rendered with
+           onNavy false so the children take their light-ground colours, and
+           the dark-mode block in email-chrome.mjs pins everything inside a
+           mark to navy. */
+        case 'MARK':   return `<mark style="background-color:${P.GOLD_PILL};color:${P.NAVY_900};padding:0 2px;">${inline(n, false)}</mark>`;
+        /* Nested quotes ALTERNATE, which is what the browser draws in the
+           packet: the outer pair is curly double, the inner pair curly single.
+           Hard-coded double at every depth gave the email
+           "the deadline is "hard" not soft" against the packet's
+           "the deadline is 'hard' not soft". */
+        case 'Q': {
+          const inner = n.parentElement && n.parentElement.closest('q');
+          return inner ? `&lsquo;${inline(n, onNavy)}&rsquo;`
+                       : `&ldquo;${inline(n, onNavy)}&rdquo;`;
+        }
         // `dir` is in KEEP_ATTR, so the packet reverses the run and the email,
         // which rebuilds tags without attributes, did not: the same sentence
         // printed the date 2026-09-15 in one artifact and 51-90-6202 in the other.
@@ -401,7 +433,7 @@ async function extractArticle(page, html) {
       return clone;
     };
 
-    const BLOCK_SEL = 'p, h1, h2, h3, h4, h5, h6, ul, ol, table, dl, pre, blockquote, div, section, aside, figure, li, dt, dd';
+    const BLOCK_SEL = 'p, h1, h2, h3, h4, h5, h6, ul, ol, table, dl, pre, blockquote, div, section, aside, figure, li, dt, dd, tr, td, th, caption';
 
     /* A heading may hold a link or inline code, so the email renders its markup
        rather than its escaped text — but inline() skips block children, so a
@@ -439,10 +471,23 @@ async function extractArticle(page, html) {
     const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
       CONTAINER_CLASS.some(c => el.classList.contains(c));
 
+    /* `dir` on a BLOCK — a cell, a paragraph — the way KEEP_ATTR gives it to the
+       packet. inlineNode carries it for inline elements; without this the same
+       cell printed "941 (Q3), amended" in the email and "amended ,)Q3( 941" in
+       the PDF, which on a date is two different dates. */
+    const dirOf = el => {
+      const d = el && el.getAttribute ? String(el.getAttribute('dir') || '').toLowerCase() : '';
+      return d === 'rtl' || d === 'ltr' || d === 'auto' ? d : '';
+    };
+    const withDir = (el, html) => {
+      const d = dirOf(el);
+      return d ? `<span dir="${d}">${html}</span>` : html;
+    };
+
     const cellsOf = tr => [...tr.children]
       .filter(c => c.tagName === 'TH' || c.tagName === 'TD')
       .map(c => ({
-        html: flatten(c, false),
+        html: withDir(c, flatten(c, false)),
         // Per cell. A `<th scope="row">` in an otherwise ordinary row is a row
         // LABEL: bold, like the browser draws it, but not a column heading.
         header: c.tagName === 'TH',
@@ -496,17 +541,33 @@ async function extractArticle(page, html) {
          it in full. Document order across the groups, and never a nested <dl>'s
          own terms. */
       const groups = ownedBy(el, 'dt, dd', p => p !== el && p.tagName === 'DL');
+      /* A definition may hold real BLOCKS — a rate table, a code sample, a
+         nested list. flatten() renders those inline, so a two-column table in a
+         <dd> arrived as "PaydayDeposit byWed-FriFollowing Wednesday" and a
+         three-line <pre> as one line of Arial with three amounts run together.
+         Those definitions are emitted as their own blocks, after the term,
+         instead of being crushed into the item. */
+      const out = [];
+      const flushList = () => { if (list.length) { out.push({ kind: 'list', ordered: false, items: [...list] }); list.length = 0; } };
+      const heavy = c => HEAVY.has(c.tagName) || c.querySelector('table, pre, ul, ol, dl, blockquote, figure');
       for (const c of groups) {
         if (c.tagName === 'DT') {
           if (term) list.push({ html: bold(term), depth: 0 });   // term with no definition
           term = flatten(c, onNavy);
         } else if (c.tagName === 'DD') {
-          list.push({ html: term ? `${bold(term)} &mdash; ${flatten(c, onNavy)}` : flatten(c, onNavy), depth: 0 });
+          if (heavy(c)) {
+            if (term) list.push({ html: bold(term), depth: 0 });
+            flushList();
+            out.push(...blocksOf(c, onNavy));
+          } else {
+            list.push({ html: term ? `${bold(term)} &mdash; ${flatten(c, onNavy)}` : flatten(c, onNavy), depth: 0 });
+          }
           term = '';
         }
       }
       if (term) list.push({ html: bold(term), depth: 0 });        // trailing orphan term
-      return list.length ? [{ kind: 'list', ordered: false, items: list }] : [];
+      flushList();
+      return out;
     };
 
     /* A list becomes a SEQUENCE of blocks, not a list plus a pile of leftovers.
@@ -630,7 +691,7 @@ async function extractArticle(page, html) {
           return text(el)
             ? [cls.contains('disclaimer')
                 ? { kind: 'disclaimer', html: inline(el, onNavy) }
-                : { kind: 'p', html: inline(el, onNavy) }]
+                : { kind: 'p', html: withDir(el, inline(el, onNavy)) }]
             : [];
         case 'H1': case 'H2': return [headBlock('h2', el, onNavy)];
         case 'H3': case 'H4':
@@ -651,7 +712,7 @@ async function extractArticle(page, html) {
           if (inner.length) return [{ kind: 'callout', label: '', blocks: inner }];
           // No inner blocks does not mean no content — a bare-text quote used
           // to render as an empty cream box.
-          return text(el) ? [{ kind: 'callout', label: '', blocks: [{ kind: 'p', html: inline(el, onNavy) }] }] : [];
+          return text(el) ? [{ kind: 'callout', label: '', blocks: [{ kind: 'p', html: withDir(el, inline(el, onNavy)) }] }] : [];
         }
         case 'FIGURE': {
           /* A figure is not only its caption. Emitting the caption alone threw
@@ -727,7 +788,7 @@ async function extractArticle(page, html) {
                blocks that interrupt them, rather than one panel plus a pile of
                blocks below it. */
             const panelSeq = [];
-            let panelOrdered = false, panelStart = 1;
+            let panelOrdered = false, panelStart = 1, panelReversed = false, panelType = '';
             let phase = 0;
             let heading = '';
             const pair = (nav, lite) => ({ nav, lite });
@@ -763,6 +824,19 @@ async function extractArticle(page, html) {
                 if (firstList && firstList.ordered) {
                   panelOrdered = true;
                   panelStart = Number.isFinite(firstList.start) ? firstList.start : 1;
+                  // reversed and type as well. The packet honours both — its
+                  // list-style:decimal reset cancels neither — so an
+                  // <ol reversed> printed 3. 2. 1. there and 1. 2. 3. here, and
+                  // "do step 1 first" named a different step in each artifact.
+                  panelReversed = !!firstList.reversed;
+                  panelType = firstList.type || '';
+                  /* A reversed list with no start counts DOWN from its own
+                     length — that is what the browser draws in the packet, and
+                     defaulting to 1 made the email print 1. 0. -1. */
+                  if (panelReversed && !Number.isFinite(firstList.start)) {
+                    panelStart = navSeq.reduce((n, b) => n + (b.kind === 'list'
+                      ? b.items.filter(i => !i.depth && !i.cont).length : 0), 0) || 1;
+                  }
                 }
                 // An EMPTY <ul> is not the checklist. Letting it advance the
                 // phase demoted the real list below it to plain bullets and
@@ -882,13 +956,16 @@ async function extractArticle(page, html) {
                   if (!seg.items.length) return [];
                   const head = first;
                   first = false;
-                  const from = panelOrdered ? panelStart + numbered : undefined;
+                  const from = panelOrdered
+                    ? (panelReversed ? panelStart - numbered : panelStart + numbered)
+                    : undefined;
                   numbered += seg.items.filter(i => !i.depth && !i.cont).length;
+                  const numbering = { ordered: panelOrdered, start: from,
+                                      reversed: panelReversed, type: panelType };
                   return [isAction
                     ? { kind: 'action', heading: head ? heading : '', lead: head ? lead : [],
-                        items: seg.items, ordered: panelOrdered, start: from }
-                    : { kind: 'sources', label: head ? srcLabel : '',
-                        items: seg.items, ordered: panelOrdered, start: from }];
+                        items: seg.items, ...numbering }
+                    : { kind: 'sources', label: head ? srcLabel : '', items: seg.items, ...numbering }];
                 })
               : [
                   ...(isAction && heading ? [{ kind: 'h3', text: heading, html: '' }] : []),
@@ -902,7 +979,7 @@ async function extractArticle(page, html) {
           // querySelector, not a direct-children check: <div><a><p>…</p></a></div>
           // is valid HTML5 and used to emit an empty <a> where a paragraph was.
           if (el.querySelector(BLOCK_SEL)) return blocksOf(el, onNavy);
-          return text(el) ? [{ kind: 'p', html: inline(el, onNavy) }] : [];
+          return text(el) ? [{ kind: 'p', html: withDir(el, inline(el, onNavy)) }] : [];
         }
       }
     };
@@ -1291,6 +1368,18 @@ function buildHtml(prs, generatedOn) {
 
   .draft-body { padding:10mm 14mm 4mm; max-width:170mm; }
   .draft-body p { margin-bottom:1.3em; }
+  /* NOTHING RUNS OFF THE PAGE. <pre> defaults to white-space:pre, so a long
+     command in a code sample laid out to 1277px on an 816px page and 64 of its
+     169 characters were simply never printed — while plainLen() counted them
+     all from the DOM and passed the packet's own completeness check. The email
+     wrapped the same block. Long unbroken tokens in cells go the same way. */
+  .draft-body pre { white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
+  .draft-body { overflow-wrap:break-word; }
+  .draft-body td, .draft-body th, .draft-body code { overflow-wrap:anywhere; }
+  /* A highlight is a gold ground; everything on it is navy, whatever colour the
+     rule for its own element would otherwise give it. Without this the panel's
+     catch-all painted cream straight over the highlight at 1.06:1. */
+  .draft-body mark, .draft-body mark * { background:var(--gold-300); color:var(--navy-900); }
   /* An open <dialog> is position:absolute over an opaque ground in the UA
      stylesheet. Forcing it open so the packet would SHOW its text instead made
      it leave the flow and paint over the paragraph beneath — a sentence about a
@@ -1387,6 +1476,18 @@ function buildHtml(prs, generatedOn) {
   .draft-body .action-list .sources-box .disclaimer { color:var(--grey-500); }
   .draft-body .action-list .callout .label { color:var(--gold-text); }
   .draft-body .action-list .sources-box .label { color:var(--grey-500); }
+
+  /* A HIGHLIGHT WINS OVER EVERY GROUND RULE ABOVE IT. Written earlier, the
+     panel's own two-class catch-all outranked it and painted cream over the
+     gold at 1.06:1; a link inside a highlight measured 1.00:1, gold on gold. */
+  .draft-body mark,
+  .draft-body mark *,
+  .draft-body .action-list mark,
+  .draft-body .action-list mark *,
+  .draft-body .sources-box mark,
+  .draft-body .sources-box mark *,
+  .draft-body .callout mark,
+  .draft-body .callout mark * { background:var(--gold-300); color:var(--navy-900); }
 
   /* ---------- reviewer notes: same language, unmistakably not the article ---------- */
   .notes {
@@ -1492,6 +1593,13 @@ async function main() {
       const paths = await prArticleFiles(pr.number);
       const articles = [];
       const skipped = [];
+      /* The subset of `skipped` that is a genuine FAILURE rather than a file
+         that was never an article. A hub or landing page added under blog/ is
+         legitimate — ledger-published-email.mjs says so in as many words — and
+         it will never render, so holding the week open for it mailed the same
+         pull request on every trigger, every Monday, for as long as it stayed
+         open. Only a render that threw is worth another attempt. */
+      const failed = [];
 
       for (const path of paths) {
         let extracted = null;
@@ -1499,7 +1607,7 @@ async function main() {
           extracted = await extractArticle(page, await fileAtRef(path, pr.head.sha));
         } catch (err) {
           console.log(`::warning::Could not render ${path} from PR #${pr.number}: ${err.message}`);
-          skipped.push(path);
+          skipped.push(path); failed.push(path);
           continue;
         }
         if (!extracted) {
@@ -1515,7 +1623,7 @@ async function main() {
         // Keep the PR in the packet even with nothing rendered: its notes are
         // still reviewable, and the reviewer has to be told the drafts exist.
         const orphanNotes = [...byFile.entries()].map(([path, md]) => ({ title: path, md }));
-        rendered.push({ ...pr, articles: [], skipped, general: [...general, ...orphanNotes],
+        rendered.push({ ...pr, articles: [], skipped, failed, general: [...general, ...orphanNotes],
                         age: ageLabel(pr.created_at) });
         continue;
       }
@@ -1534,7 +1642,7 @@ async function main() {
         if (!shown.has(path)) general.push({ title: path, md });
       }
 
-      rendered.push({ ...pr, articles, skipped, general, age: ageLabel(pr.created_at) });
+      rendered.push({ ...pr, articles, skipped, failed, general, age: ageLabel(pr.created_at) });
       console.log(`PR #${pr.number}: ${articles.length} article(s) rendered.`);
     }
 
@@ -1675,7 +1783,11 @@ async function main() {
              for as long as it stayed open — the duplicate this whole rework
              exists to remove. Article files that failed to render ARE a loss,
              so those stay out and the Monday floor tries again. */
-          : !(pr.skipped || []).length))
+          /* Nothing to render is not a loss; a render that THREW is. A pull
+             request touching only automation, and one adding a hub page under
+             blog/, are both ordinary — the email names them and links them,
+             and nothing more will ever come of rebuilding them. */
+          : !(pr.failed || []).length))
         .map(pr => String(pr.number));
       await fs.writeFile(process.env.CARRIED_OUT, JSON.stringify(carried));
       console.log(`Delivered this week: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);

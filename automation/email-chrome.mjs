@@ -110,6 +110,14 @@ export function emailShell(o) {
     .t-body   { color: #cbd3e1 !important; }
     .t-muted, .t-foot { color: #9aa6bd !important; }
     .t-gold, .t-link  { color: ${C.GOLD_PILL} !important; }
+    /* A <mark> paints its own opaque gold ground, so the classes inside it must
+       NOT follow the page into dark: .t-strong flipping to cream over that gold
+       measured 1.19:1 and .t-link 1.00:1 — the highlighted words disappeared
+       entirely. Last, and !important, so it beats the flips above. */
+    mark, mark *,
+    mark .t-title, mark .t-strong, mark .t-body, mark .t-muted, mark .t-foot,
+    mark .t-gold, mark .t-link
+      { background-color: ${C.GOLD_PILL} !important; color: ${C.NAVY_900} !important; }
   }
 
   [data-ogsb] .e-page,    .e-page[data-ogsb]    { background-color: #0b1220 !important; }
@@ -118,6 +126,12 @@ export function emailShell(o) {
   [data-ogsb] .e-callout, .e-callout[data-ogsb] { background-color: #22304c !important; }
   [data-ogsb] .e-th,      .e-th[data-ogsb]      { background-color: #2b3a5c !important; }
   [data-ogsb] .e-cell,    .e-cell[data-ogsb]    { border-color: #3d4d6e !important; }
+  [data-ogsb] mark, mark[data-ogsb], [data-ogsc] mark, mark[data-ogsc],
+  [data-ogsb] mark *, [data-ogsc] mark *,
+  [data-ogsb] mark .t-link, [data-ogsc] mark .t-link,
+  [data-ogsb] mark .t-strong, [data-ogsc] mark .t-strong,
+  [data-ogsb] mark .t-body, [data-ogsc] mark .t-body
+    { background-color: ${C.GOLD_PILL} !important; color: ${C.NAVY_900} !important; }
   [data-ogsb] .e-cta,     .e-cta[data-ogsb]     { border: 1px solid #3d4d6e !important; }
   [data-ogsc] .t-title,   .t-title[data-ogsc],
   [data-ogsc] .t-strong,  .t-strong[data-ogsc]  { color: ${C.CREAM} !important; }
@@ -291,12 +305,30 @@ const preHtml = (text, html) => `
 
 /** The navy "do this before <date>" block. Checkmarks are cells, not bullets:
     list-style images are stripped by Outlook and ::before never renders. */
-const actionHtml = (heading, items, lead = [], ordered = false, start = 1) => {
+/* a/A/i/I markers, the way an <ol type> draws them. The panel writes its own
+   marker column, so a type the packet honoured came out as plain decimals here
+   — "step b" against "step 2" for the same line. */
+const ROMAN = [[1000,'m'],[900,'cm'],[500,'d'],[400,'cd'],[100,'c'],[90,'xc'],[50,'l'],
+               [40,'xl'],[10,'x'],[9,'ix'],[5,'v'],[4,'iv'],[1,'i']];
+const roman = n => { let o = ''; for (const [v, t] of ROMAN) while (n >= v) { o += t; n -= v; } return o; };
+const alpha = n => { let o = ''; while (n > 0) { const r = (n - 1) % 26; o = String.fromCharCode(97 + r) + o; n = (n - r - 1) / 26; } return o; };
+const listMarker = (n, type) => {
+  if (!Number.isFinite(n) || n < 1) return String(n);
+  switch (type) {
+    case 'a': return alpha(n);
+    case 'A': return alpha(n).toUpperCase();
+    case 'i': return roman(n);
+    case 'I': return roman(n).toUpperCase();
+    default:  return String(n);
+  }
+};
+
+const actionHtml = (heading, items, lead = [], ordered = false, start = 1, reversed = false, type = '') => {
   // An ORDERED checklist numbers its steps in the marker column instead of
   // repeating the checkmark: the packet renders the <ol> markers, and a panel
   // that dropped them left "fix step 4" pointing at nothing.
-  let n = start;
-  const marker = i => (i && i.cont ? '' : ordered ? `${n++}.` : '&#10003;');
+  let n = Number.isFinite(start) ? start : 1;
+  const marker = i => (i && i.cont ? '' : ordered ? `${listMarker(reversed ? n-- : n++, type)}.` : '&#10003;');
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
       <td class="e-cta" bgcolor="${C.NAVY_900}" style="background-color:${C.NAVY_900};border-radius:10px;padding:20px 24px;">
@@ -320,11 +352,11 @@ const indent = i => (typeof i === 'string' ? i : (i.depth
   ? `<span style="padding-left:${i.depth * 16}px;display:inline-block;">&#8250; ${i.html}</span>`
   : i.html));
 
-const sourcesHtml = (label, items, ordered = false, start = 1) => `
+const sourcesHtml = (label, items, ordered = false, start = 1, reversed = false, type = '') => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
       <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
         ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
-        <${ordered ? 'ol' : 'ul'}${ordered && start !== 1 ? ` start="${Number(start)}"` : ''} class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
+        <${ordered ? 'ol' : 'ul'}${ordered && Number.isFinite(start) && start !== 1 ? ` start="${Number(start)}"` : ''}${ordered && reversed ? ' reversed' : ''}${ordered && type ? ` type="${type}"` : ''} class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
           ${items.map(i => `<li style="margin:0 0 5px;${i && i.cont ? 'list-style:none;' : ''}">${indent(i)}</li>`).join('')}
         </${ordered ? 'ol' : 'ul'}>
       </td>
@@ -351,9 +383,9 @@ export function articleBlocksHtml(blocks) {
       case 'callout':
         return `<div style="margin:0 0 18px;">${callout(b.label || '', articleBlocksHtml(b.blocks))}</div>`;
       case 'action':
-        return actionHtml(b.heading, b.items, b.lead, b.ordered, b.start);
+        return actionHtml(b.heading, b.items, b.lead, b.ordered, b.start, b.reversed, b.type);
       case 'sources':
-        return sourcesHtml(b.label, b.items, b.ordered, b.start);
+        return sourcesHtml(b.label, b.items, b.ordered, b.start, b.reversed, b.type);
       case 'disclaimer':
         return `<p class="t-muted" style="margin:0 0 4px;font:italic 400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">${b.html}</p>`;
       default:

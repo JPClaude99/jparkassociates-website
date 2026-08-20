@@ -61,10 +61,15 @@ name: Ledger draft review
 #     the record reads empty and the email goes out — a duplicate is an
 #     annoyance, a missed review is a week of lost work.
 #   • A review that reaches the inbox WITHOUT the article text does not mark
-#     the week done, so the floor tries again. If the first attempt was
+#     the week done, so the next trigger tries again. If the first attempt was
 #     degraded and the second succeeds, the reviewer gets two emails that week
-#     — deliberately. Two alerts beat one alert and no review, and with only
-#     two triggers in a week it cannot go further than that.
+#     — deliberately. Two alerts beat one alert and no review.
+#   • That retry is CAPPED AT TWO ATTEMPTS PER DRAFT PER WEEK, counted in the
+#     record, not inferred from the trigger. "There are only two triggers in a
+#     week" was never true: the announcement scan has workflow_dispatch and can
+#     be re-run after a failure, and every completion fires this workflow, so
+#     three scan runs used to mean three review emails for any draft that had
+#     not rendered. The cap holds however many times the scan runs.
 #   • The lock lives in a BRANCH-SCOPED Actions cache, so a manual dispatch
 #     from any ref other than the default branch would neither see nor write
 #     the record the scheduled runs use, and would duplicate. That case is
@@ -179,9 +184,19 @@ jobs:
             // Missing or unreadable reads as empty, which sends — see the
             // fail-open note in the header.
             const RECORD = '${{ runner.temp }}/ledger-sent/sent.json';
-            let sent = [];
-            try { sent = JSON.parse(fs.readFileSync(RECORD, 'utf8')); } catch { /* first run this week */ }
-            if (!Array.isArray(sent)) sent = [];
+            /* { done: ["70"], tries: { "71": 2 } }
+               `done`  — the draft's text reached the inbox; never send again this week.
+               `tries` — how many emails have NAMED this draft this week. Two is the
+                         cap: the first attempt may be degraded, the second is the
+                         retry, and a third is a duplicate however it was triggered.
+               A bare array is the old shape and means "done", so a record written
+               by the previous version of this workflow still suppresses correctly. */
+            const MAX_TRIES = 2;
+            let rec = { done: [], tries: {} };
+            try { rec = JSON.parse(fs.readFileSync(RECORD, 'utf8')); } catch { /* first run this week */ }
+            if (Array.isArray(rec)) rec = { done: rec, tries: {} };
+            const done  = new Set((rec && Array.isArray(rec.done) ? rec.done : []).map(String));
+            const tries = (rec && rec.tries && typeof rec.tries === 'object') ? rec.tries : {};
 
             const prs = await github.paginate(github.rest.pulls.list, {
               owner: context.repo.owner,
@@ -197,9 +212,16 @@ jobs:
             // Pull request number only — see the LOCK note in the header for why
             // the head SHA is deliberately not part of this.
             const keyOf = p => String(p.number);
-            const drafts = open.filter(p => !sent.includes(keyOf(p)));
+            const spent = p => Number(tries[keyOf(p)] || 0) >= MAX_TRIES;
+            const drafts = open.filter(p => !done.has(keyOf(p)) && !spent(p));
             const held = open.length - drafts.length;
             if (held) core.info(`${held} draft(s) already emailed this week; not resending.`);
+            const capped = open.filter(p => !done.has(keyOf(p)) && spent(p)).map(keyOf);
+            if (capped.length) {
+              core.warning(`#${capped.join(', #')} had ${MAX_TRIES} review emails this week without ` +
+                           'their text rendering, so no more will be sent until next Monday. ' +
+                           'Fix the article and re-run, or dispatch this workflow.');
+            }
             core.setOutput('count', String(drafts.length));
             const body = drafts.map(p => {
               const ageH = Math.round((Date.now() - Date.parse(p.created_at)) / 36e5);
@@ -228,7 +250,8 @@ jobs:
             // builder decides that, not this step. Written into place only
             // after the email is away, so a run that dies mid-build leaves the
             // record untouched and the next trigger finishes the job.
-            fs.writeFileSync('${{ runner.temp }}/prev.json', JSON.stringify(sent));
+            fs.writeFileSync('${{ runner.temp }}/prev.json',
+                             JSON.stringify({ done: [...done], tries }));
 
             if (drafts.length) {
               core.notice(`Ledger drafts awaiting review: ${drafts.map(p => '#' + p.number).join(', ')}`);
@@ -422,7 +445,14 @@ jobs:
               let counts = {};
               try { counts = JSON.parse(fs.readFileSync('${{ runner.temp }}/counts.json', 'utf8')); }
               catch { /* the builder did not get that far */ }
-              const nDrafts = live.reduce((n, s) => n + (counts[String(s.number)] ?? 1), 0);
+              /* A pull request can legitimately carry ZERO drafts — one that
+                 touched only automation, or added a hub page under blog/. With
+                 every survivor at zero the total is zero, and the subject read
+                 "0 Ledger drafts ready for review" over a body headline reading
+                 "1 draft ready for review". Count pull requests when there are
+                 no drafts to count; the email is still about something. */
+              const nDrafts = live.reduce((n, s) => n + (counts[String(s.number)] ?? 1), 0)
+                              || live.length;
               const only = nDrafts === 1 && live.length === 1
                 ? drafts.find(d => d.number === live[0].number) : null;
               core.setOutput('subject', only
@@ -506,43 +536,51 @@ jobs:
       # as a bare link, and shut out for the rest of the week. The builder
       # writes the list of pull requests whose text actually reached the inbox,
       # and only those are recorded.
-      # THE FLOOR CONCLUDES THE WEEK. Leaving a draft out of the record is a
-      # request to try again, and after the 20:00 Monday cron there is nothing
-      # left in the week to try — so on that run every draft the email named is
-      # recorded, whether or not its text rendered. Without this, a draft that
-      # cannot be rendered (a malformed blog/*.html, which is deterministic)
-      # was mailed by BOTH of Monday's triggers, every Monday, for as long as
-      # the pull request stayed open: two identical emails a week, forever.
-      # The 15:45 fast path still records only what it delivered, so a
-      # transient failure there is still retried at 20:00. Two on a bad
-      # Monday, one on a good one, never three.
+      # TWO THINGS ARE RECORDED, and the difference is the whole de-duplication.
+      #   done  — this draft's text reached the inbox. Never send it again this
+      #           week; there is nothing left to do for it.
+      #   tries — this draft was NAMED by an email, whether or not its text
+      #           rendered. At two, it stops being sent regardless of what
+      #           triggers this workflow next.
+      # The retry exists because a review that arrives without the article text
+      # is a degraded review: a transient npm or Chromium failure at 15:45 must
+      # not mark the week done and leave the reviewer with nothing to read. The
+      # CAP exists because the failure may not be transient, and because "there
+      # are only two triggers in a week" was never true — the announcement scan
+      # can be dispatched by hand and re-run after a failure, and every one of
+      # its completions fires this workflow.
+      # Written AFTER the send, never before, and always: a run that records
+      # nothing is a run whose draft comes back on the next trigger.
       - name: Record what went out
         id: record
         if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
         continue-on-error: true       # the email is already away; a lost record costs a duplicate
-        env:
-          FLOOR: ${{ github.event_name == 'schedule' }}
         run: |
-          prev='${{ runner.temp }}/prev.json'
-          carried='${{ runner.temp }}/carried.json'
-          # On the floor, the drafts this email named stand in for the ones it
-          # carried. A manual dispatch is a deliberate re-send and is treated
-          # like the fast path: conservative, records only what it delivered.
-          if [ "$FLOOR" = "true" ]; then carried='${{ runner.temp }}/emailed.json'; fi
-          if [ ! -s "$carried" ] || [ "$(cat "$carried")" = "[]" ]; then
-            echo "::warning::No draft's text reached this email, so the week is NOT marked done; the next run will try again."
-            echo "keep=no" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           mkdir -p '${{ runner.temp }}/ledger-sent'
           node -e '
             const fs = require("fs");
-            const read = p => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return []; } };
-            const merged = [...new Set([...read(process.argv[1]), ...read(process.argv[2]).map(String)])];
-            fs.writeFileSync(process.argv[3], JSON.stringify(merged));
-            console.log("Recorded as reviewed this week:", merged.join(", ") || "(none)");
-          ' "$prev" "$carried" '${{ runner.temp }}/ledger-sent/sent.json'
+            const read = (p, d) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return d; } };
+            let prev = read(process.argv[1], null);
+            if (Array.isArray(prev)) prev = { done: prev, tries: {} };
+            if (!prev || typeof prev !== "object") prev = { done: [], tries: {} };
+            const done  = new Set((Array.isArray(prev.done) ? prev.done : []).map(String));
+            const tries = (prev.tries && typeof prev.tries === "object") ? { ...prev.tries } : {};
+
+            // Every draft the email NAMED gets an attempt counted against it.
+            for (const n of read(process.argv[3], []).map(String)) tries[n] = Number(tries[n] || 0) + 1;
+            // Those whose text actually reached the reviewer are finished.
+            for (const n of read(process.argv[2], []).map(String)) { done.add(n); delete tries[n]; }
+
+            fs.writeFileSync(process.argv[4], JSON.stringify({ done: [...done], tries }));
+            const open = Object.entries(tries).map(([n, t]) => `#${n} (attempt ${t})`);
+            console.log("Delivered this week:", [...done].map(n => "#" + n).join(", ") || "(none)");
+            if (open.length) console.log("Named but not delivered:", open.join(", "));
+          ' "$prev_json" "$carried_json" "$emailed_json" '${{ runner.temp }}/ledger-sent/sent.json'
           echo "keep=yes" >> "$GITHUB_OUTPUT"
+        env:
+          prev_json: ${{ runner.temp }}/prev.json
+          carried_json: ${{ runner.temp }}/carried.json
+          emailed_json: ${{ runner.temp }}/emailed.json
 
       # Cache entries are immutable, so each write takes a fresh key and the
       # restore-keys prefix above picks up the most recent one for the week.

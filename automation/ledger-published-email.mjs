@@ -60,7 +60,13 @@ async function ghPaged(pathname) {
 async function isArticle(slug) {
   try {
     const html = await fs.readFile(path.join(DIR, 'blog', `${slug}.html`), 'utf8');
-    return /class="[^"]*\barticle-body\b/.test(html);
+    /* Tolerant of how the class attribute is written. The template emits
+       `class="article-body"`, but this file is hand-edited by the scan agent
+       every run, and `class='article-body'` or `class = "article-body"` used to
+       fail the test — which does not just skip the announcement, it drops the
+       slug before the orphan alarm below can see it. The article is live on the
+       site and the run is green and silent about it. */
+    return /\bclass\s*=\s*(?:"[^"]*\barticle-body\b|'[^']*\barticle-body\b|article-body\b)/.test(html);
   } catch {
     console.log(`::warning::blog/${slug}.html is not in the checkout; not treating it as an article.`);
     return false;
@@ -90,14 +96,18 @@ async function main() {
      live weeks ago; announcing "it's live" again is a duplicate notice about
      old news. A rename gives the article a new URL, so that one does count.
 
-     'copied' and 'changed' count too, and leaving them out was a silent miss:
-     GitHub reports 'copied' when git's copy detection matches a new file
-     against an existing one, which is exactly the shape of a new article
-     rendered from blog/_template.html or written from a sibling. Pages serves
-     the file whichever word the API used, so the article was live, unannounced,
-     and the orphan alarm below never fired either — the slug had already been
-     dropped. Everything except 'modified' and 'removed'. */
-  const NEW = new Set(['added', 'renamed', 'copied', 'changed']);
+     'copied' counts too, and leaving it out was a silent miss: GitHub reports
+     'copied' when git's copy detection matches a NEW file against an existing
+     one, which is exactly the shape of a new article rendered from
+     blog/_template.html or written from a sibling. Pages serves the file
+     whichever word the API used, so the article was live, unannounced, and the
+     orphan alarm below never fired either — the slug had already been dropped.
+
+     'changed' is NOT in this set. It is a typechange on a path that already
+     exists — a symlink becoming a regular file — so the article was live long
+     before this pull request, and announcing it is the same duplicate that
+     keeps 'modified' out. */
+  const NEW = new Set(['added', 'renamed', 'copied']);
   const candidates = files
     .filter(f => NEW.has(f.status))
     .map(f => /^blog\/([^/]+)\.html$/.exec(f.filename))
@@ -161,7 +171,7 @@ async function main() {
         ${[esc(LABELS[p.category] || p.category), p.readMins ? `${esc(p.readMins)} min read` : '']
             .filter(Boolean).join(' &middot; ')}
       </p>
-      <p class="t-title" style="margin:0 0 10px;font:700 18px/1.35 Georgia,'Times New Roman',serif;color:${C.NAVY_900};">${esc(p.title)}</p>
+      <p class="t-title" style="margin:0 0 10px;font:700 18px/1.35 Georgia,'Times New Roman',serif;color:${C.NAVY_900};">${esc(p.title || p.slug)}</p>
       <p class="t-body" style="margin:0 0 12px;font:400 14px/1.55 Arial,Helvetica,sans-serif;color:${C.SLATE};">${esc(p.excerpt)}</p>
       <a href="${SITE}${esc(p.slug)}.html" class="t-link" style="font:600 13px/1.4 Arial,Helvetica,sans-serif;color:${C.NAVY_900};text-decoration:underline;">Read it &rarr;</a>
     `)).join('')}`;
@@ -189,15 +199,20 @@ async function main() {
     '',
     `Pull request #${prNumber} is merged; GitHub Pages is deploying now.`,
     '',
+    /* Never `${p.field}` straight into the text part: the HTML part runs every
+       field through esc(), which turns a missing one into an empty string,
+       while the plain-text part printed a literal "undefined" — including in
+       the subject line, as "Published: undefined". The two alternatives of one
+       message have to say the same thing, and neither may show a placeholder. */
     ...published.flatMap((p, i) => [
-      `${i + 1}. ${p.title}`,
+      `${i + 1}. ${p.title || p.slug}`,
       // A manifest entry missing readMins printed a literal "undefined min read"
       // in the plain-text part while the HTML part printed nothing — the two
       // alternatives of one message disagreeing.
       `   ${[LABELS[p.category] || p.category, p.readMins ? `${p.readMins} min read` : '']
              .filter(Boolean).join(' · ')}`,
       `   ${SITE}${p.slug}.html`,
-      `   ${p.excerpt}`,
+      ...(p.excerpt ? [`   ${p.excerpt}`] : []),
       '',
     ]),
     `Sources and confidence notes: ${pr.html_url}`,
@@ -207,10 +222,15 @@ async function main() {
     '—',
     'J Park & Associates · Certified Public Accountants',
     '2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214 · (818) 248-1580',
+    // The HTML part carries the firm bio; without it here the two alternatives
+    // of one message have different footers.
+    'A personalized CPA office on Foothill Blvd. in La Crescenta, keeping the books,',
+    'taxes, and payroll of Crescenta Valley and Los Angeles businesses in order for',
+    'over 15 years.',
   ].join('\n');
 
   const subject = one
-    ? `Published: ${published[0].title}`
+    ? `Published: ${published[0].title || published[0].slug}`
     : `Published: ${published.length} Ledger articles are live`;
 
   if (process.env.EMAIL_HTML_OUT) await fs.writeFile(process.env.EMAIL_HTML_OUT, html);
