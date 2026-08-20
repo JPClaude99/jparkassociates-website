@@ -39,14 +39,19 @@ permissions:
   contents: read
   pull-requests: read
 
-# Per pull request, and queued rather than cancelled — the send is the last
-# step, so cancelling a run mid-flight could kill a notice that was already
-# half out the door. A merge fires `closed` exactly once, so the automatic path
-# cannot collide with itself; this exists for the manual re-send, which is
-# deliberately unbounded (that is the point of a re-send) but must not run twice
-# at the same moment for the same pull request.
+# One publish notice at a time, repo-wide, and queued rather than cancelled —
+# the send is the last step, so cancelling mid-flight could kill a notice that
+# was already half out the door.
+#
+# Deliberately NOT keyed on the pull request. A workflow-level expression is
+# evaluated from the raw event before any step runs, so it cannot use the
+# sanitised number below: a dispatch typed as "#42" grouped as
+# `ledger-published-#42` and never matched the merge path's `ledger-published-42`,
+# which is exactly the collision the group existed to prevent. These runs are
+# rare and take under a minute, so serialising all of them costs nothing and
+# cannot be talked out of matching.
 concurrency:
-  group: ledger-published-${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+  group: ledger-published
   cancel-in-progress: false
 
 jobs:
@@ -65,8 +70,13 @@ jobs:
       # concurrency group that does not match the automatic path's.
       - name: Read the pull request number
         id: pr
+        env:
+          # Through the environment, not interpolated into the script — this is
+          # free text from a dispatch form, and the sanitiser has to run on it
+          # rather than after it has already become part of the command.
+          RAW: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
         run: |
-          n=$(printf '%s' "${{ github.event.inputs.pr_number || github.event.pull_request.number }}" | tr -cd '0-9')
+          n=$(printf '%s' "$RAW" | tr -cd '0-9')
           [ -n "$n" ] || { echo "::error::pr_number must be a number."; exit 1; }
           echo "number=$n" >> "$GITHUB_OUTPUT"
 

@@ -444,7 +444,13 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
         ${overflow.map(a => `<li style="margin:0 0 5px;">${esc(a.title)}</li>`).join('')}
       </ul>`, C.GREY) : ''}`;
 
-  return `<!--ledger:articles=${all.length}-->\n` + emailShell({
+  /* Three numbers, because one was not enough to tell the truth with. The
+     plain-text part is a whole message on its own, and "the full text of each
+     draft is in the HTML version" was false whenever a draft failed to render
+     or got demoted by the size guard — the HTML body says so in a callout, the
+     text part had no way to know. The workflow reads these and writes a
+     sentence that matches. */
+  return `<!--ledger:articles=${all.length};skipped=${skipped.length};full=${Math.min(fullCount, all.length)}-->\n` + emailShell({
     title: 'Ledger drafts ready for review',
     preheader,
     eyebrow: 'The Ledger · weekly draft review',
@@ -777,8 +783,12 @@ async function main() {
     ])).catch(() => {});
     // C.GREY. The old #8A93A6 measured 3.09:1 on white, on every page.
   const foot = 'font-family:Inter,Arial,sans-serif;font-size:7.5pt;color:#5C6577;width:100%;padding:0 14mm;';
+    // Render to a temporary name and move it into place only on success. A
+    // page.pdf() that throws partway leaves a truncated but non-empty file, and
+    // the workflow's `[ -s "$pdf" ]` test would attach it and call it complete.
+    const partial = `${OUT}.partial`;
     await page.pdf({
-      path: OUT,
+      path: partial,
       format: 'Letter',
       printBackground: true,
       displayHeaderFooter: true,
@@ -791,6 +801,7 @@ async function main() {
       margin: { top: '0', bottom: '14mm', left: '0', right: '0' },
     });
 
+    await fs.rename(partial, OUT);
     const { size } = await fs.stat(OUT);
     console.log(`Wrote ${OUT} (${Math.round(size / 1024)} KB)`);
 

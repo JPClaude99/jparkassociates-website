@@ -32,13 +32,18 @@ name: Ledger draft review
 #   because the floor is itself a cron. Nothing inside this repo can cover
 #   that; GitHub emails the admin when it suspends, and a commit re-enables it.
 #
-#   LOCK — a per-week send record, keyed on each draft's pull request number
-#   AND its head SHA. Every trigger, every re-run and every manual dispatch
-#   reads it first and emails only the drafts not already in it. Keyed per
-#   draft rather than per set on purpose: a set-shaped key meant that merging
-#   one of two drafts changed the key, and the 20:00 floor then re-sent the
-#   whole review five hours after the 15:00 one. Push a new commit to a draft
-#   and its SHA changes, so a genuinely revised article does get a fresh email.
+#   LOCK — a per-week send record listing the pull requests already emailed.
+#   Every trigger, every re-run and every manual dispatch reads it first and
+#   emails only the drafts not already in it.
+#
+#   The key is the pull request NUMBER and nothing else. Not the set of open
+#   drafts: merging one of two changed a set-shaped key, and the 20:00 floor
+#   re-sent the whole review five hours after the 15:00 one. And not the head
+#   SHA either, which had the same fault one level down — a one-word copyedit,
+#   a rebase, or the "Update branch" button moves the head, and the floor read
+#   that as a draft it had never seen. Once a week means once a week, whatever
+#   the branch does in between.
+#
 #   Next Monday the week rolls over and an unreviewed draft resurfaces — that
 #   nag is deliberate, and it is the only thing standing between a forgotten
 #   draft and permanent silence.
@@ -124,16 +129,21 @@ jobs:
       # so it would mail a second copy of the same review. Refuse instead.
       - name: This week, on the right branch
         id: week
+        env:
+          # Through the environment, never interpolated into the script: a ref
+          # name may legally contain a backtick, a $ or a semicolon, and this
+          # step's whole job is to be the thing that cannot be talked around.
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          if [ "${{ github.ref_name }}" != "${{ github.event.repository.default_branch }}" ]; then
-            echo "::error::Run this workflow from ${{ github.event.repository.default_branch }}. The de-duplication record is a branch-scoped Actions cache, so a run from ${{ github.ref_name }} cannot see it and would send a duplicate review email."
+          if [ "$REF" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Run this workflow from $DEFAULT_BRANCH. The de-duplication record is a branch-scoped Actions cache, so a run from $REF cannot see it and would send a duplicate review email."
             exit 1
           fi
           # ISO year and week, from date(1) rather than hand-rolled arithmetic.
           echo "id=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       - name: Load this week's send record
-        id: state
         continue-on-error: true          # unreachable cache -> empty record -> send
         uses: actions/cache/restore@v4
         with:
@@ -149,7 +159,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            // What has already gone out this week, as "<pr>:<headSha>" keys.
+            // Which pull requests have already been emailed this week.
             // Missing or unreadable reads as empty, which sends — see the
             // fail-open note in the header.
             const RECORD = '${{ runner.temp }}/ledger-sent/sent.json';
@@ -168,9 +178,9 @@ jobs:
               (p.title.startsWith('[Ledger]') ||
                (p.head && p.head.ref && p.head.ref.startsWith('ledger/auto-')))
             );
-            const keyOf = p => `${p.number}:${p.head.sha}`;
-            // Only what this week has not already been mailed. Per draft, not
-            // per set: merging one of two drafts must not re-send the other.
+            // Pull request number only — see the LOCK note in the header for why
+            // the head SHA is deliberately not part of this.
+            const keyOf = p => String(p.number);
             const drafts = open.filter(p => !sent.includes(keyOf(p)));
             const held = open.length - drafts.length;
             if (held) core.info(`${held} draft(s) already emailed this week; not resending.`);
@@ -247,7 +257,6 @@ jobs:
       # Word first, and on purpose: it needs no browser, so it is still on disk
       # for the email to name even if Chromium falls over in the next step.
       - name: Build the Word review note
-        id: docx
         if: steps.gate.outputs.go == 'yes'
         continue-on-error: true
         env:
@@ -260,7 +269,6 @@ jobs:
       # full copy of every draft, from the same extraction pass as the PDF, so
       # the two can never describe different articles.
       - name: Build the draft review PDF and email body
-        id: pdf
         if: steps.gate.outputs.go == 'yes'
         continue-on-error: true      # the email matters more than the packet
         env:
@@ -289,9 +297,24 @@ jobs:
           # stamps the count. Without this the plain-text part claimed "the full
           # text is in the HTML version" even when Chromium had died and the
           # body held nothing but a PR link.
-          arts=$(sed -n 's/.*<!--ledger:articles=\([0-9]*\)-->.*/\1/p' "$html" 2>/dev/null | head -1)
-          echo "articles=${arts:-0}" >> "$GITHUB_OUTPUT"
-          [ "${arts:-0}" != "0" ] || echo "::warning::The email body carries no article text this run."
+          # What the HTML body actually ended up carrying. The builder stamps
+          # three numbers; the plain-text part is written from them rather than
+          # from an assumption, because it is a whole message on its own.
+          stamp=$(grep -o '<!--ledger:[^>]*-->' "$html" 2>/dev/null | head -1)
+          num() { printf '%s' "$stamp" | sed -n "s/.*$1=\([0-9]*\).*/\1/p"; }
+          arts=$(num articles); skip=$(num skipped); full=$(num full)
+          arts=${arts:-0}; skip=${skip:-0}; full=${full:-0}
+          echo "articles=$arts" >> "$GITHUB_OUTPUT"
+          if [ "$arts" = "0" ]; then
+            cov='The drafts could not be rendered into this email — see the Actions log. Read them in the pull request above.'
+            echo "::warning::The email body carries no article text this run."
+          elif [ "$skip" != "0" ] || [ "$full" != "$arts" ]; then
+            cov="This email reproduces $full of $((arts + skip)) drafts in full; read the rest in the pull request above."
+            echo "::warning::Only $full of $((arts + skip)) drafts are reproduced in full."
+          else
+            cov='The full text of each draft is in the HTML version of this email.'
+          fi
+          echo "coverage=$cov" >> "$GITHUB_OUTPUT
           echo "pdf=$([ -s "$pdf" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
           echo "docx=$([ -s "$docx" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
           [ -s "$html" ] || echo "::warning::No branded HTML body this run — the drafts could not be rendered. Falling back to plain text."
@@ -310,21 +333,33 @@ jobs:
             const drafts = JSON.parse(fs.readFileSync('${{ runner.temp }}/drafts.json', 'utf8'));
             const states = await Promise.all(drafts.map(d =>
               github.rest.pulls.get({ ...context.repo, pull_number: d.number })
-                .then(r => ({ number: d.number, state: r.data.state }))
-                .catch(() => ({ number: d.number, state: 'unknown' }))));
-            // 'unknown' counts as open: a GitHub hiccup must not eat the email.
-            const gone = states.filter(s => s.state === 'closed');
-            // ALL of them, not any of them. The email, the PDF and the Word note
-            // were all built from the snapshot taken before the render, and they
-            // say in as many words that these drafts are "not live yet". If even
-            // one has merged since, that is now false — and ledger-published.yml
-            // has already sent the opposite. Send nothing; the record stays
-            // unwritten, so the next trigger rebuilds from what is actually open.
-            core.setOutput('open', gone.length ? 'no' : 'yes');
-            if (gone.length) {
-              core.notice(`${gone.map(s => '#' + s.number).join(', ')} merged or closed while this run ` +
-                          `was building, so the review it built is out of date. Not sending; the next ` +
-                          `run will rebuild from what is still open.`);
+                .then(r => ({ number: d.number, state: r.data.state, merged: !!r.data.merged }))
+                // 'unknown' counts as open and unmerged: a GitHub hiccup must
+                // not eat the email.
+                .catch(() => ({ number: d.number, state: 'unknown', merged: false }))));
+            // MERGED is the only state that makes this email false. The body,
+            // the PDF and the Word note were all built from the snapshot taken
+            // before the render and say in as many words that these drafts are
+            // "not live yet" — which ledger-published.yml has just contradicted.
+            // Send nothing, and leave the record unwritten so the next run
+            // rebuilds from what is actually open.
+            const merged = states.filter(s => s.merged);
+            // Closed WITHOUT merging is different: nothing in the email becomes
+            // untrue, the draft was simply rejected. Muting the whole review for
+            // it used to cost the surviving drafts a full week, silently and on
+            // a green run.
+            const rejected = states.filter(s => s.state === 'closed' && !s.merged);
+            const live = states.filter(s => s.state !== 'closed');
+            core.setOutput('open', merged.length || !live.length ? 'no' : 'yes');
+            if (merged.length) {
+              core.warning(`${merged.map(s => '#' + s.number).join(', ')} merged while this run was ` +
+                           `building, so the review it built says "not live yet" about an article that ` +
+                           `is. Not sending; the record stays unwritten and the next run rebuilds.`);
+            } else if (!live.length) {
+              core.warning('Every draft was closed while this run was building; nothing left to review.');
+            } else if (rejected.length) {
+              core.warning(`${rejected.map(s => '#' + s.number).join(', ')} closed unmerged while this ` +
+                           `run was building; sending the review for the ${live.length} still open.`);
             }
 
       - name: Email the weekly review
@@ -346,9 +381,7 @@ jobs:
 
             ${{ steps.find.outputs.body }}
 
-            ${{ steps.mail.outputs.articles == '0'
-                && 'The full article text could not be rendered into this email — see the Actions log. Read the drafts in the pull request above.'
-                || 'The full text of each draft is in the HTML version of this email.' }}
+            ${{ steps.mail.outputs.coverage }}
             ${{ steps.mail.outputs.pdf == 'yes'
                 && 'Attached: ledger-drafts.pdf — each draft as it will read on the site, with reviewer notes after it.'
                 || 'The PDF review packet could not be built this run; see the Actions log.' }}
@@ -366,16 +399,30 @@ jobs:
 
       # Written AFTER the send, never before: a run that dies during the build
       # must leave the record untouched so the next trigger can finish the job.
+      # Only a review that actually CARRIED the drafts counts as sent. If the
+      # builders failed and the email went out as a bare pull-request link, the
+      # record stays unwritten so the floor tries again — otherwise a transient
+      # npm failure at 15:45 would mark the week done and the reviewer would
+      # never see the articles at all. Two degraded alerts beat one degraded
+      # alert and no review, and there are only two triggers in a week, so this
+      # cannot loop.
       - name: Record what went out
+        id: record
         if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
         run: |
-          mkdir -p '${{ runner.temp }}/ledger-sent'
-          cp '${{ runner.temp }}/pending.json' '${{ runner.temp }}/ledger-sent/sent.json'
+          if [ "${{ steps.mail.outputs.articles }}" = "0" ]; then
+            echo "::warning::This review carried no article text, so the week is NOT marked done; the next run will try again."
+            echo "keep=no" >> "$GITHUB_OUTPUT"
+          else
+            mkdir -p '${{ runner.temp }}/ledger-sent'
+            cp '${{ runner.temp }}/pending.json' '${{ runner.temp }}/ledger-sent/sent.json'
+            echo "keep=yes" >> "$GITHUB_OUTPUT"
+          fi
 
       # Cache entries are immutable, so each write takes a fresh key and the
       # restore-keys prefix above picks up the most recent one for the week.
       - name: Keep the record for the rest of the week
-        if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
+        if: steps.record.outputs.keep == 'yes'
         continue-on-error: true         # a lost record costs a duplicate, not the email
         uses: actions/cache/save@v4
         with:
