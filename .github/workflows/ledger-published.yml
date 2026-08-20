@@ -2,7 +2,8 @@ name: Ledger published
 
 # Emails jasonpark@jparkassociates.com once, when a [Ledger] pull request merges
 # and its articles go live on jparkassociates.com. The companion to
-# ledger-draft-alert.yml, which nags daily until that merge happens.
+# ledger-draft-alert.yml, which sends the weekly review email that gets the
+# article read in the first place.
 #
 # Every Ledger email comes from the same identity — The Ledger Bot
 # <marketing@jparkassociates.com> — so the thread reads as one voice. Gmail only
@@ -15,7 +16,7 @@ name: Ledger published
 # automation publishes nothing and sends nothing — that is a clean no-op, not a
 # failure.
 #
-# Uses the same two secrets as the draft alert; see that file's header for the
+# Uses the same two secrets as the weekly review; see that file's header for the
 # App Password setup and its gotchas.
 
 on:

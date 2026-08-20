@@ -3,7 +3,10 @@
    THE LEDGER — publish notification email
    ----------------------------------------------------------------------------
    Called by .github/workflows/ledger-published.yml when a [Ledger] pull request
-   merges. Says which articles just went live and links them on the site.
+   merges. One short, branded note to jasonpark@jparkassociates.com saying which
+   articles just went live, and linking them on the site. Deliberately plain —
+   the reviewing happens before the merge, in the weekly review email; by the
+   time this arrives there is nothing left to decide.
 
    Article facts come from blog/posts.js, the manifest that is already the
    single source of truth for the blog index — not from re-parsing the article
@@ -20,7 +23,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { C, esc, panel, callout, emailShell } from './email-chrome.mjs';
+import { C, esc, panel, emailShell } from './email-chrome.mjs';
 
 const API   = process.env.GITHUB_API_URL || 'https://api.github.com';
 const REPO  = process.env.GITHUB_REPOSITORY;
@@ -83,8 +86,8 @@ async function main() {
 
   const body = `
     <p class="t-body" style="margin:0 0 18px;font:400 15px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
-      Pull request #${esc(prNumber)} is merged and GitHub Pages has finished deploying.
-      ${one ? 'The article below is' : 'The articles below are'} now live on jparkassociates.com.
+      Pull request #${esc(prNumber)} is merged, so ${one ? 'the article below is' : 'the articles below are'}
+      publishing to jparkassociates.com now &mdash; GitHub Pages takes a minute or two to deploy.
     </p>
     ${published.map(p => panel(`
       <p class="t-gold" style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GOLD_TEXT};">
@@ -95,13 +98,6 @@ async function main() {
       <a href="${SITE}${esc(p.slug)}.html" class="t-link" style="font:600 13px/1.4 Arial,Helvetica,sans-serif;color:${C.NAVY_900};text-decoration:underline;">Read it &rarr;</a>
     `)).join('')}`;
 
-  const aside = callout('Sources', `
-    <p class="t-body" style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
-      Every figure came from a page fetched during the scan that drafted ${one ? 'it' : 'them'}.
-      The reasoning and anything the scan hedged on is in
-      <a href="${esc(pr.html_url)}" class="t-link" style="color:${C.NAVY_900};">pull request #${esc(prNumber)}</a>.
-    </p>`);
-
   const html = emailShell({
     title: one ? 'A Ledger article is live' : 'Ledger articles are live',
     preheader: `${plural(published.length, 'article')} published to jparkassociates.com.`,
@@ -109,20 +105,21 @@ async function main() {
     headline: one ? 'An article is live.' : `${plural(published.length, 'article')} are live.`,
     dateLine: generatedOn,
     bodyHtml: body,
-    asideHtml: aside,
     cta: {
       href: 'https://jparkassociates.com/blog.html',
       label: 'Read The Ledger',
       lead: 'Everything from this month, in one place.',
       caption: 'The next announcement scan runs Monday at 8 AM Pacific.',
     },
-    footNote: 'Internal automation &mdash; sent once, when a Ledger pull request merges.',
+    footNote: `Internal automation &mdash; sent once, when a Ledger pull request merges.
+      Sources and confidence notes stay in
+      <a href="${esc(pr.html_url)}" class="t-link" style="color:${C.GREY};">pull request #${esc(prNumber)}</a>.`,
   });
 
   const text = [
     one ? 'An article is live.' : `${plural(published.length, 'article')} are live.`,
     '',
-    `Pull request #${prNumber} is merged and GitHub Pages has finished deploying.`,
+    `Pull request #${prNumber} is merged; GitHub Pages is deploying now.`,
     '',
     ...published.flatMap((p, i) => [
       `${i + 1}. ${p.title}`,
@@ -131,7 +128,7 @@ async function main() {
       `   ${p.excerpt}`,
       '',
     ]),
-    `Reasoning and confidence notes: ${pr.html_url}`,
+    `Sources and confidence notes: ${pr.html_url}`,
     '',
     'Read The Ledger: https://jparkassociates.com/blog.html',
     '',

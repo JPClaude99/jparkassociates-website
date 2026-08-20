@@ -1,7 +1,7 @@
 /* ============================================================================
    J PARK & ASSOCIATES — shared email chrome
    ----------------------------------------------------------------------------
-   One shell for every automated Ledger email, so the draft alert and the
+   One shell for every automated Ledger email, so the weekly review and the
    publish notice cannot drift apart. Matches emails/_template.html: cream
    ground, 640px table, navy masthead, gold letterspaced eyebrow, Georgia
    headings, Arial body.
@@ -75,7 +75,7 @@ export const callout = (label, inner, accent = C.GOLD_RULE) => `
  * Full email document.
  * @param {object} o
  * @param {string} o.preheader  inbox preview text
- * @param {string} o.eyebrow    e.g. "The Ledger · draft alert"
+ * @param {string} o.eyebrow    e.g. "The Ledger · weekly draft review"
  * @param {string} o.headline   masthead headline
  * @param {string} o.dateLine   date under the headline
  * @param {string} o.bodyHtml   markup for the white card
@@ -169,4 +169,112 @@ export function emailShell(o) {
 </td></tr></table>
 </body>
 </html>`;
+}
+
+/* ============================================================================
+   ARTICLE BODY -> EMAIL HTML
+   ----------------------------------------------------------------------------
+   The weekly review email carries a full copy of each drafted article, not a
+   list of titles, so the article can be read and judged in the inbox without
+   opening GitHub or the PDF.
+
+   The article arrives as a normalized BLOCK LIST, not as site markup. The
+   blocks are produced from a real DOM in the browser (ledger-draft-pdf.mjs) and
+   carry only whitelisted inline HTML, so nothing from the article's stylesheet,
+   scripts or layout can leak into a mail client. Rendering lives here, next to
+   the rest of the chrome, so the email and the PDF share one palette.
+
+   Block kinds — see extractArticle() in ledger-draft-pdf.mjs:
+     {kind:'p', html}                     {kind:'h2'|'h3', text}
+     {kind:'list', ordered, items:[html]} {kind:'callout', label, blocks}
+     {kind:'action', heading, items}      {kind:'sources', label, items}
+     {kind:'disclaimer', html}
+   ========================================================================== */
+
+const BODY_FONT = "400 15px/1.7 Arial,Helvetica,sans-serif";
+const SERIF     = "Georgia,'Times New Roman',serif";
+
+/** Gmail clips a message body past ~102 KB behind a "View entire message" link. */
+export const GMAIL_CLIP_BYTES = 102 * 1024;
+
+const listHtml = (items, ordered) => `
+      <${ordered ? 'ol' : 'ul'} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
+        ${items.map(i => `<li style="margin:0 0 7px;">${i}</li>`).join('')}
+      </${ordered ? 'ol' : 'ul'}>`;
+
+/** The navy "do this before <date>" block. Checkmarks are cells, not bullets:
+    list-style images are stripped by Outlook and ::before never renders. */
+const actionHtml = (heading, items) => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
+      <td class="e-cta" bgcolor="${C.NAVY_900}" style="background-color:${C.NAVY_900};border-radius:10px;padding:20px 24px;">
+        ${heading ? `<p style="margin:0 0 12px;font:700 15px/1.35 ${SERIF};color:${C.GOLD_PILL};">${esc(heading)}</p>` : ''}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          ${items.map(i => `
+          <tr>
+            <td width="20" valign="top" style="font:700 14px/1.6 ${SERIF};color:${C.GOLD_PILL};">&#10003;</td>
+            <td style="font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};padding-bottom:7px;">${i}</td>
+          </tr>`).join('')}
+        </table>
+      </td>
+    </tr></table>`;
+
+const sourcesHtml = (label, items) => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
+      <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
+        <p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label || 'Sources')}</p>
+        <ul class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
+          ${items.map(i => `<li style="margin:0 0 5px;">${i}</li>`).join('')}
+        </ul>
+      </td>
+    </tr></table>`;
+
+/** Render one block list. Unknown kinds are dropped rather than guessed at. */
+export function articleBlocksHtml(blocks) {
+  return (blocks || []).map(b => {
+    switch (b.kind) {
+      case 'p':
+        return `<p class="t-body" style="margin:0 0 15px;font:${BODY_FONT};color:${C.SLATE};">${b.html}</p>`;
+      case 'h2':
+        return `<h2 class="t-title" style="margin:26px 0 10px;font:700 19px/1.3 ${SERIF};color:${C.NAVY_900};">${esc(b.text)}</h2>`;
+      case 'h3':
+        return `<h3 class="t-title" style="margin:22px 0 8px;font:700 16px/1.35 ${SERIF};color:${C.NAVY_900};">${esc(b.text)}</h3>`;
+      case 'list':
+        return listHtml(b.items, b.ordered);
+      case 'callout':
+        return `<div style="margin:0 0 18px;">${callout(b.label || '', articleBlocksHtml(b.blocks))}</div>`;
+      case 'action':
+        return actionHtml(b.heading, b.items);
+      case 'sources':
+        return sourcesHtml(b.label, b.items);
+      case 'disclaimer':
+        return `<p class="t-muted" style="margin:0 0 4px;font:italic 400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">${b.html}</p>`;
+      default:
+        return '';
+    }
+  }).join('');
+}
+
+/**
+ * One drafted article, as a full-width card: navy hero band carrying the
+ * category, headline and byline, then the article itself.
+ * @param {object} a  {title, category, source, date, readTime, path, blocks}
+ * @param {object} o  {index, total, prNumber}
+ */
+export function draftArticleHtml(a, o = {}) {
+  const meta = [a.source, a.date, a.readTime].filter(Boolean).map(esc).join(' &middot; ');
+  const seq  = o.total > 1 ? `Draft ${o.index} of ${o.total}` : 'Draft';
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;">
+      <tr><td bgcolor="${C.NAVY}" style="background-color:${C.NAVY};border-radius:10px 10px 0 0;padding:22px 24px 20px;">
+        <p style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2.5px;text-transform:uppercase;color:${C.GOLD_PILL};">
+          ${esc(seq)}${a.category ? ` &middot; ${esc(a.category)}` : ''}
+        </p>
+        <p style="margin:0;font:700 22px/1.28 ${SERIF};color:${C.CREAM};">${esc(a.title)}</p>
+        ${meta ? `<p style="margin:10px 0 0;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${C.GOLD_PILL};">${meta}</p>` : ''}
+        <p style="margin:8px 0 0;font:400 11px/1.5 Arial,Helvetica,sans-serif;color:${C.GOLD_PILL};">${esc(a.path || '')}</p>
+      </td></tr>
+      <tr><td class="e-item" bgcolor="${C.WHITE}" style="background-color:${C.WHITE};border:1px solid #e8e2d6;border-top:0;border-radius:0 0 10px 10px;padding:24px 24px 12px;">
+        ${articleBlocksHtml(a.blocks)}
+      </td></tr>
+    </table>`;
 }

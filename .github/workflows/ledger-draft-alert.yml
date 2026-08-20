@@ -1,55 +1,83 @@
-name: Ledger draft alert
+name: Ledger draft review
 
-# Emails jasonpark@jparkassociates.com whenever a Ledger article has been
-# DRAFTED but not yet PUBLISHED — i.e. an open pull request whose title starts
-# with "[Ledger]" or whose branch is ledger/auto-*. Merging that PR is what
-# deploys the article to jparkassociates.com, so an unmerged Ledger PR is
-# exactly "a draft is ready but not live."
+# THE WEEKLY REVIEW EMAIL
 #
-# The email carries a PDF review packet built by automation/ledger-draft-pdf.mjs:
-# each drafted article rendered as it will read on the site, and after each one a
-# REVIEWER NOTES panel (cream ground, sans headings — deliberately not article
-# styling) holding that article's section of the PR body. Confidence notes, "also
-# noticed" and "upcoming" land in a RUN NOTES panel at the end.
+# One email a week, on Monday, carrying every Ledger article that has been
+# drafted and is waiting to be published. It contains:
 #
-# Why this is failproof (no dependence on any running Claude session):
-#   • schedule            — checks every day and RE-emails as long as a draft
-#                           sits unmerged, so one missed email is never fatal.
-#   • pull_request         — also fires the instant a draft PR is opened.
-#   • workflow_dispatch    — run the check on demand from the Actions tab.
-#   • If the SMTP secrets below are missing/wrong, the email step FAILS, which
-#     makes GitHub email the repo admin about the failed run — so you are
-#     alerted even when the alerting itself is misconfigured.
-#   • If the PDF cannot be built the email still goes out, saying so in the body.
-#     Losing the packet must never cost you the alert.
+#   • the full text of each draft, in the body, branded and readable in the
+#     inbox — no GitHub, no attachment needed to judge the writing;
+#   • ledger-drafts.pdf         — the same drafts laid out for print, each
+#                                 followed by its reviewer-notes panel;
+#   • Ledger-review-notes.docx  — the reviewer notes on their own, in Word,
+#                                 ready to mark up and send back.
 #
-# ── One-time setup (≈3 minutes) ────────────────────────────────────────────
+# Merging the pull request is what deploys the article to jparkassociates.com;
+# ledger-published.yml then sends the short "it's live" notice.
+#
+# ── CADENCE: why workflow_run and not a Monday cron ───────────────────────
+# This fires when `Ledger announcement scan` finishes — and that scan is the
+# thing that runs Mondays at 08:00 Pacific and drafts the articles. Hanging the
+# email off the scan rather than off its own clock buys two guarantees a cron
+# cannot:
+#
+#   1. NO RACE. A cron has to guess how long the scan takes, and GitHub delays
+#      scheduled runs under load. Reacting to the scan's completion means the
+#      drafts always exist by the time we look for them.
+#   2. NO DUPLICATES. Exactly one trigger, so exactly one email per scan. The
+#      previous version of this file also fired on `pull_request`, unfiltered —
+#      every unrelated PR opened anywhere in the repo re-sent the whole alert.
+#      That trigger is gone and must not come back: the mail is about the state
+#      of the drafts, not about any one pull request.
+#
+# A draft left unmerged is picked up again by the next Monday's scan, so an
+# unreviewed article keeps surfacing weekly until it is merged or closed.
+#
+# ── FAILURE BEHAVIOUR ─────────────────────────────────────────────────────
+#   • Both builders are continue-on-error, and the email names only the
+#     enclosures that actually reached disk. Losing an attachment never costs
+#     you the email.
+#   • The two builders are independent: the Word note needs no browser, so a
+#     Chromium failure cannot take it down with the PDF.
+#   • If the SMTP secrets are missing or wrong the send step FAILS, and GitHub
+#     emails the repo admin about the failed run — so a silently-dead alerter
+#     is not a failure mode.
+#   • Nothing open to review → no email. That is a clean no-op, not a failure.
+#
+# ── One-time setup (≈3 minutes) ───────────────────────────────────────────
 # Add two repository secrets under:
 #   Settings → Secrets and variables → Actions → New repository secret
-#     LEDGER_ALERT_SMTP_USER   a Gmail / Google Workspace address to send FROM
-#     LEDGER_ALERT_SMTP_PASS   a Google App Password for that address
+#     LEDGER_ALERT_SMTP_USER   the Gmail / Google Workspace mailbox to send FROM
+#     LEDGER_ALERT_SMTP_PASS   a Google App Password for that mailbox
 # Create the App Password at myaccount.google.com → Security → 2-Step
 # Verification → App passwords, and store it as the 16 characters with NO
 # SPACES — Google displays it in four groups, and pasting the spaces is the
 # usual cause of "535-5.7.8 Username and Password not accepted".
 # (Workspace accounts: an admin may first need to allow app passwords for the
 # org.) LEDGER_ALERT_SMTP_USER must be the mailbox the App Password belongs to,
-# not an alias. The "to" address is set below.
+# not an alias. The From identity and the recipient live in the composite
+# action, .github/actions/send-ledger-email.
 # ───────────────────────────────────────────────────────────────────────────
 
 on:
-  schedule:
-    - cron: '0 15 * * *'      # 15:00 UTC ≈ 08:00 America/Los_Angeles, daily
-  pull_request:
-    types: [opened, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["Ledger announcement scan"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: read
 
+# One review email at a time. Two overlapping runs would mail the same drafts
+# twice, which is the exact failure this workflow was rebuilt to end.
+concurrency:
+  group: ledger-draft-review
+  cancel-in-progress: true
+
 jobs:
-  ledger-draft-alert:
+  ledger-draft-review:
     runs-on: ubuntu-latest
 
     steps:
@@ -79,10 +107,13 @@ jobs:
               return `#${p.number} — ${p.title}\n${p.html_url}\n(open ${age} · branch ${p.head.ref})`;
             }).join('\n\n');
             core.setOutput('body', body);
+            // The PR title already starts with "[Ledger]"; the subject says so
+            // in words, so strip the tag rather than printing it twice.
+            const plain = t => t.replace(/^\[Ledger\]\s*/, '');
             core.setOutput('subject', drafts.length === 1
-              ? `Ledger draft awaiting publish: ${drafts[0].title}`
-              : `${drafts.length} Ledger drafts awaiting publish`);
-            // Hand the PDF builder what it needs. Written to a file rather than a
+              ? `Ready for review: ${plain(drafts[0].title)}`
+              : `${drafts.length} Ledger drafts ready for review`);
+            // Hand the builders what they need. Written to a file rather than a
             // step output: PR bodies are long and contain arbitrary markdown.
             fs.writeFileSync(process.env.DRAFTS_JSON, JSON.stringify(drafts.map(p => ({
               number: p.number,
@@ -93,17 +124,16 @@ jobs:
               created_at: p.created_at,
             }))));
             if (drafts.length) {
-              core.notice(`Ledger drafts open and unmerged: ${drafts.map(p => '#' + p.number).join(', ')}`);
+              core.notice(`Ledger drafts awaiting review: ${drafts.map(p => '#' + p.number).join(', ')}`);
             } else {
-              core.info('No open Ledger drafts — nothing to alert.');
+              core.info('No open Ledger drafts — nothing to review, no email.');
             }
 
-      - name: Check out the PDF builder
+      - name: Check out the builders
         if: steps.find.outputs.count != '0'
         uses: actions/checkout@v6
         with:
-          # Always the default branch's builder — this workflow also runs on
-          # `pull_request`, and a PR must not get to run its own version of it.
+          # Always the default branch's builders, never a pull request's.
           ref: ${{ github.event.repository.default_branch }}
 
       - name: Set up Node
@@ -112,53 +142,85 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Build the draft review PDF
+      - name: Install the builders' dependencies
+        if: steps.find.outputs.count != '0'
+        run: npm install --no-save --no-audit --no-fund puppeteer@25 marked@18 docx@9
+
+      # Word first, and on purpose: it needs no browser, so it is still on disk
+      # for the email to name even if Chromium falls over in the next step.
+      - name: Build the Word review note
+        id: docx
+        if: steps.find.outputs.count != '0'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRAFTS_JSON: ${{ runner.temp }}/drafts.json
+          DOCX_OUT: ${{ runner.temp }}/Ledger-review-notes.docx
+        run: node automation/ledger-review-notes-docx.mjs
+
+      # Writes both the PDF packet and the HTML email body — the body carries a
+      # full copy of every draft, from the same extraction pass as the PDF, so
+      # the two can never describe different articles.
+      - name: Build the draft review PDF and email body
         id: pdf
         if: steps.find.outputs.count != '0'
-        continue-on-error: true      # the alert matters more than the attachment
+        continue-on-error: true      # the email matters more than the packet
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRAFTS_JSON: ${{ runner.temp }}/drafts.json
           OUT_PATH: ${{ runner.temp }}/ledger-drafts.pdf
+          DOCX_PATH: ${{ runner.temp }}/Ledger-review-notes.docx
           EMAIL_HTML_OUT: ${{ runner.temp }}/email.html
-        run: |
-          npm install --no-save --no-audit --no-fund puppeteer@25 marked@18
-          node automation/ledger-draft-pdf.mjs
+        run: node automation/ledger-draft-pdf.mjs
 
-      # Decide from what is actually on disk, not from the build's exit code —
-      # the builder writes the branded email body before the work that can fail.
+      # Decide from what is actually on disk, not from either build's exit code —
+      # the PDF builder writes the branded email body before the work that can fail.
       - name: Decide what the email can carry
         id: mail
         if: steps.find.outputs.count != '0'
         run: |
           html='${{ runner.temp }}/email.html'
           pdf='${{ runner.temp }}/ledger-drafts.pdf'
+          docx='${{ runner.temp }}/Ledger-review-notes.docx'
+          att=''
           if [ -s "$html" ]; then echo "html=$html" >> "$GITHUB_OUTPUT"; else echo "html=" >> "$GITHUB_OUTPUT"; fi
-          if [ -s "$pdf" ];  then echo "pdf=$pdf"          >> "$GITHUB_OUTPUT"; else echo "pdf=" >> "$GITHUB_OUTPUT"; fi
-          [ -s "$pdf" ]  || echo "::warning::No draft review PDF this run; sending the alert without it."
-          [ -s "$html" ] || echo "::warning::No branded HTML body this run; falling back to plain text."
+          if [ -s "$pdf" ];  then att="$pdf";  else echo "::warning::No draft review PDF this run; sending without it."; fi
+          if [ -s "$docx" ]; then att="${att:+$att,}$docx"; else echo "::warning::No Word review note this run; sending without it."; fi
+          echo "attachments=$att" >> "$GITHUB_OUTPUT"
+          echo "pdf=$([ -s "$pdf" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          echo "docx=$([ -s "$docx" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          [ -s "$html" ] || echo "::warning::No branded HTML body this run — the drafts could not be rendered. Falling back to plain text."
 
-      - name: Email the alert
+      - name: Email the weekly review
         if: steps.find.outputs.count != '0'
-        # Sender lives in the composite action, not here — see its header.
+        # Sender and recipient live in the composite action, not here — see its header.
         uses: ./.github/actions/send-ledger-email
         with:
           smtp_user: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
           smtp_pass: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
           subject: ${{ steps.find.outputs.subject }}
           html_file: ${{ steps.mail.outputs.html }}
-          attachments: ${{ steps.mail.outputs.pdf }}
-          # Plain-text alternative, always sent alongside the HTML part.
+          attachments: ${{ steps.mail.outputs.attachments }}
+          # Plain-text alternative, always sent alongside the HTML part. This is
+          # the whole message for a text-only client, so it stands on its own.
           body: |
-            A Ledger article is drafted but not yet live on jparkassociates.com.
-            Merging its pull request is what publishes it.
+            Ledger articles are drafted and ready for your review. They are not
+            live on jparkassociates.com yet — merging the pull request is what
+            publishes them.
 
             ${{ steps.find.outputs.body }}
 
-            ${{ steps.mail.outputs.pdf != ''
+            ${{ steps.mail.outputs.html == ''
+                && 'The full article text could not be rendered into this email — see the Actions log. Read the drafts in the pull request above.'
+                || 'The full text of each draft is in the HTML version of this email.' }}
+            ${{ steps.mail.outputs.pdf == 'yes'
                 && 'Attached: ledger-drafts.pdf — each draft as it will read on the site, with reviewer notes after it.'
-                || 'The PDF review packet could not be built this run; see the Actions log. Review the pull request directly.' }}
+                || 'The PDF review packet could not be built this run; see the Actions log.' }}
+            ${{ steps.mail.outputs.docx == 'yes'
+                && 'Attached: Ledger-review-notes.docx — the reviewer notes in Word, ready to mark up.'
+                || 'The Word review note could not be built this run; see the Actions log.' }}
 
             —
-            Automated daily check (.github/workflows/ledger-draft-alert.yml).
-            You'll keep getting this once a day until the PR is merged or closed.
+            Automated weekly review (.github/workflows/ledger-draft-alert.yml),
+            sent after each Monday announcement scan. A draft left unmerged
+            appears again next Monday.

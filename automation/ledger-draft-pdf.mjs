@@ -7,6 +7,12 @@
    the site, and follows each one with a REVIEWER NOTES panel drawn from that
    article's section of the PR body.
 
+   It writes TWO things: the PDF packet, and the branded HTML body of the weekly
+   review email — which carries a full copy of each draft, not a list of
+   headlines, so the article can be read in the inbox. Both come from the same
+   extraction pass, so the email and the packet cannot describe different
+   articles.
+
    The notes panel is deliberately styled apart from the article: cream ground,
    sans-serif headings (articles use the Playfair serif), a navy rule and an
    explicit "not for publication" label. Same design language, unmistakably not
@@ -29,6 +35,9 @@
                   head:{sha,ref},created_at}
      OUT_PATH        where to write the PDF
      EMAIL_HTML_OUT  optional; write the branded HTML email body here
+     DOCX_PATH       optional; the Word review note, if the earlier step built
+                     one. Only read, never written — its presence decides
+                     whether the email names it as an enclosure.
      HTML_OUT        optional; also dump the intermediate HTML for debugging
      GITHUB_TOKEN / GITHUB_REPOSITORY / GITHUB_API_URL
    ========================================================================== */
@@ -36,7 +45,9 @@
 import fs from 'node:fs/promises';
 import puppeteer from 'puppeteer';
 import { marked } from 'marked';
-import { C, esc, panel, callout, emailShell } from './email-chrome.mjs';
+import { C, esc, panel, callout, emailShell,
+         draftArticleHtml, GMAIL_CLIP_BYTES } from './email-chrome.mjs';
+import { parseNotes, ageLabel, generatedOn as todayLong } from './ledger-notes.mjs';
 
 const API   = process.env.GITHUB_API_URL || 'https://api.github.com';
 const REPO  = process.env.GITHUB_REPOSITORY;
@@ -83,37 +94,9 @@ const fileAtRef = (path, ref) =>
 
 /* ---------- PR body -> notes --------------------------------------------- */
 
-/**
- * Split a PR body into { byFile: Map<path, md>, order: Map<path, index>,
- * general: [{title, md}] }. `order` preserves the scan agent's numbering so the
- * packet reads 1, 2 rather than alphabetically by filename.
- */
-function parseNotes(body) {
-  const byFile  = new Map();
-  const order   = new Map();
-  const general = [];
-  if (!body || !body.trim()) return { byFile, order, general };
-
-  // Split on level-2 headings, keeping each heading with its section.
-  const sections = body.split(/\n(?=##\s)/g);
-  for (const section of sections) {
-    const headingMatch = section.match(/^##\s+(.+?)\s*$/m);
-    const heading = headingMatch ? headingMatch[1].trim() : '';
-    const rest    = headingMatch ? section.slice(headingMatch[0].length) : section;
-
-    // A per-article section names its file in backticks near the top.
-    const pathMatch = rest.match(/`(blog\/[A-Za-z0-9._-]+\.html)`/);
-    if (pathMatch && /^\d+\./.test(heading)) {
-      byFile.set(pathMatch[1], rest.trim());
-      order.set(pathMatch[1], order.size);
-    } else if (rest.trim() || heading) {
-      // Drop the horizontal rules the scan agent uses between article blocks.
-      const md = rest.replace(/^\s*---\s*$/gm, '').trim();
-      if (md) general.push({ title: heading || 'Run summary', md });
-    }
-  }
-  return { byFile, order, general };
-}
+/* parseNotes() moved to ./ledger-notes.mjs — the Word review note builder
+   parses the same PR bodies and the two must never disagree about which notes
+   belong to which article. */
 
 /* ---------- article extraction ------------------------------------------- */
 
@@ -143,6 +126,97 @@ async function extractArticle(page, html) {
           .filter(Boolean)
       : [];
 
+    /* ---- article body -> normalized blocks, for the email --------------
+       The email carries a full copy of the draft, so the article body has to
+       cross from site markup into mail-client markup. Doing it here, against
+       a real DOM, means no regex ever parses HTML — and the block list that
+       comes out carries only whitelisted inline tags, so nothing from the
+       site's stylesheet or scripts can ride along into the inbox.
+       Rendering of these blocks lives in email-chrome.mjs. ---------------- */
+    const escHtml = t => String(t).replace(/[&<>"]/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    // Inline level: keep emphasis and links, unwrap everything else to text.
+    const inline = (node) => {
+      let out = '';
+      for (const n of node.childNodes) {
+        if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
+        if (n.nodeType !== 1) continue;
+        switch (n.tagName) {
+          case 'BR':     out += '<br />'; break;
+          case 'A':      out += `<a class="t-link" href="${escHtml(n.getAttribute('href') || '')}" style="color:#1B2A4A;text-decoration:underline;">${inline(n)}</a>`; break;
+          case 'STRONG':
+          case 'B':      out += `<strong class="t-strong" style="color:#1B2A4A;font-weight:700;">${inline(n)}</strong>`; break;
+          case 'EM':
+          case 'I':      out += `<em>${inline(n)}</em>`; break;
+          case 'CODE':   out += `<code style="font-family:Consolas,Menlo,monospace;font-size:13px;">${inline(n)}</code>`; break;
+          case 'SUP':    out += `<sup>${inline(n)}</sup>`; break;
+          case 'SUB':    out += `<sub>${inline(n)}</sub>`; break;
+          case 'SCRIPT':
+          case 'STYLE':  break;
+          default:       out += inline(n);   // span, and anything unexpected
+        }
+      }
+      return out;
+    };
+
+    const items = el => {
+      const list = el && el.querySelector('ul, ol');
+      return list ? [...list.children].filter(li => li.tagName === 'LI').map(inline) : [];
+    };
+
+    const blocksOf = (root) => {
+      const out = [];
+      for (const el of root.children) {
+        const cls = el.classList;
+        switch (el.tagName) {
+          case 'P':
+            out.push(cls.contains('disclaimer')
+              ? { kind: 'disclaimer', html: inline(el) }
+              : { kind: 'p', html: inline(el) });
+            break;
+          case 'H1':
+          case 'H2': out.push({ kind: 'h2', text: el.textContent.trim() }); break;
+          case 'H3':
+          case 'H4': out.push({ kind: 'h3', text: el.textContent.trim() }); break;
+          case 'UL':
+          case 'OL':
+            out.push({ kind: 'list', ordered: el.tagName === 'OL',
+                       items: [...el.children].filter(li => li.tagName === 'LI').map(inline) });
+            break;
+          case 'BLOCKQUOTE':
+            out.push({ kind: 'callout', label: '', blocks: blocksOf(el) });
+            break;
+          case 'FIGURE': case 'IMG': case 'SCRIPT': case 'STYLE': case 'HR':
+            break;                                   // no images in the packet
+          case 'DIV': case 'SECTION': case 'ASIDE': {
+            if (cls.contains('callout')) {
+              const label = el.querySelector('.label');
+              const inner = el.cloneNode(true);
+              const stray = inner.querySelector('.label');
+              if (stray) stray.remove();
+              out.push({ kind: 'callout', label: label ? label.textContent.trim() : '',
+                         blocks: blocksOf(inner) });
+            } else if (cls.contains('action-list')) {
+              const h = el.querySelector('h2, h3, h4');
+              out.push({ kind: 'action', heading: h ? h.textContent.trim() : '', items: items(el) });
+            } else if (cls.contains('sources-box')) {
+              const label = el.querySelector('.label');
+              out.push({ kind: 'sources', label: label ? label.textContent.trim() : 'Sources',
+                         items: items(el) });
+            } else {
+              out.push(...blocksOf(el));             // unknown wrapper: descend
+            }
+            break;
+          }
+          default: {
+            if (el.textContent.trim()) out.push({ kind: 'p', html: inline(el) });
+          }
+        }
+      }
+      return out;
+    };
+
     return {
       title:    txt('h1') || document.title.replace(/\s*\|.*$/, ''),
       category: txt('.cat'),
@@ -151,6 +225,7 @@ async function extractArticle(page, html) {
       dateIso:  (meta && meta.querySelector('time') && meta.querySelector('time').getAttribute('datetime')) || '',
       readTime: extra.join(' · '),
       bodyHtml: body.innerHTML,
+      blocks:   blocksOf(body),
     };
   }, SITE);
 }
@@ -169,80 +244,138 @@ const notesPanel = (kind, label, heading, innerHtml) => `
 /* ---------- branded HTML email body -------------------------------------- */
 
 /* Chrome, palette and the dark-mode reasoning all live in email-chrome.mjs so
-   the draft alert and the publish notice cannot drift apart. Read the header
+   the weekly review and the publish notice cannot drift apart. Read the header
    note there before changing a colour. */
-function buildEmailHtml(prs, generatedOn, hasPdf) {
+/**
+ * The weekly review email.
+ *
+ * It carries a full, readable copy of every drafted article — not a list of
+ * headlines — so the article can be judged in the inbox. The PDF packet and the
+ * Word review note ride along as attachments for anyone who would rather read
+ * or annotate offline.
+ *
+ * @param {Array}  prs          PRs with .articles (may be empty on the first pass)
+ * @param {string} generatedOn  long date line
+ * @param {{pdf:boolean, docx:boolean}} att  which attachments made it
+ * @param {number} fullCount    how many articles to print in full (rest listed)
+ */
+function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   // The body is written once before the render work (which can fail) and again
   // after it succeeds. On that first pass there is no article data yet, so
   // nothing may claim a count it does not have — this is what produced the
   // "0 drafts, written and waiting." headline.
-  const articleCount = prs.reduce((n, pr) => n + pr.articles.length, 0);
-  const counted = articleCount > 0;
+  const all = prs.flatMap(pr => pr.articles.map(a => ({ ...a, pr })));
+  const counted = all.length > 0;
 
-  const headline  = counted ? `${plural(articleCount, 'draft')}, written and waiting.`
-                            : 'Drafts written and waiting.';
-  const preheader = counted ? `${plural(articleCount, 'Ledger article')} drafted and waiting — merging publishes them.`
-                            : 'Ledger drafts are written and waiting — merging publishes them.';
-  const intro     = counted
-    ? `${articleCount === 1 ? 'An article is' : 'Articles are'} drafted but not yet live on jparkassociates.com.
-       Merging the pull request is what publishes ${articleCount === 1 ? 'it' : 'them'}.`
+  const headline  = counted ? `${plural(all.length, 'draft')} ready for review.`
+                            : 'Drafts ready for review.';
+  const preheader = counted
+    ? `${plural(all.length, 'Ledger article')} drafted and waiting — the full text is below.`
+    : 'Ledger drafts are written and waiting — merging publishes them.';
+  const intro = counted
+    ? `${all.length === 1 ? 'One article is' : `${all.length} articles are`} drafted and ready for your review.
+       ${all.length === 1 ? 'It is' : 'They are'} reproduced in full below, exactly as ${all.length === 1 ? 'it' : 'they'} will read on
+       jparkassociates.com. Merging the pull request is what publishes ${all.length === 1 ? 'it' : 'them'}.`
     : `${plural(prs.length, 'pull request')} drafted but not yet live on jparkassociates.com.
        Merging is what publishes the articles inside.`;
 
-  const body = `
-    <p class="t-body" style="margin:0 0 18px;font:400 15px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">${intro}</p>
-    ${prs.map(pr => panel(`
-      <p class="t-gold" style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GOLD_TEXT};">
-        PR #${esc(pr.number)} &middot; open ${esc(pr.age)}
-      </p>
-      <p class="t-title" style="margin:0 0 12px;font:700 17px/1.35 Georgia,'Times New Roman',serif;color:${C.NAVY_900};">${esc(pr.title)}</p>
-      ${pr.articles.length ? `
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">
-        ${pr.articles.map((a, i) => `
-        <tr>
-          <td width="26" valign="top" class="t-gold" style="font:700 14px/1.6 Georgia,'Times New Roman',serif;color:${C.GOLD_TEXT};">${i + 1}.</td>
-          <td class="t-body" style="font:400 14px/1.55 Arial,Helvetica,sans-serif;color:${C.SLATE};padding-bottom:8px;">
-            ${esc(a.title)}
-            <span class="t-muted" style="display:block;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${C.GREY};">
-              ${[a.category, a.readTime].filter(Boolean).map(esc).join(' &middot; ')}
-            </span>
-          </td>
-        </tr>`).join('')}
-      </table>` : ''}
-      <a href="${esc(pr.html_url)}" class="t-link" style="font:600 13px/1.4 Arial,Helvetica,sans-serif;color:${C.NAVY_900};text-decoration:underline;">Review on GitHub &rarr;</a>
-    `)).join('')}`;
+  // What actually made it onto the message. Never promise an attachment that
+  // failed to build — the reviewer would go looking for a file that isn't there.
+  const enclosures = [
+    att.pdf  && ['ledger-drafts.pdf',
+                 'each draft laid out as it will read on the site, with a reviewer-notes panel after it.'],
+    att.docx && ['Ledger-review-notes.docx',
+                 'the reviewer notes on their own — sources, reasoning and anything the scan hedged on — in Word, ready to mark up.'],
+  ].filter(Boolean);
 
-  const aside = hasPdf
-    ? callout('Attached', `
-        <p class="t-body" style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
-          <strong class="t-strong" style="color:${C.NAVY_900};">ledger-drafts.pdf</strong> &mdash; each draft laid out as it will read on the site,
-          with a reviewer-notes panel after it carrying the sources, the reasoning, and anything the scan hedged on.
-          Read it anywhere; no GitHub needed.
+  const aside = enclosures.length
+    ? callout('Attached', enclosures.map(([name, what]) => `
+        <p class="t-body" style="margin:0 0 8px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
+          <strong class="t-strong" style="color:${C.NAVY_900};">${esc(name)}</strong> &mdash; ${what}
+        </p>`).join('') + `
+        <p class="t-muted" style="margin:6px 0 0;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${C.GREY};">
+          Read either one anywhere; no GitHub needed.
         </p>`)
     : callout('', `
         <p class="t-body" style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
-          The PDF review packet could not be built this run &mdash; see the Actions log. Review the pull request directly.
+          Neither the PDF packet nor the Word review note could be built this run &mdash; see the Actions log.
+          The full article text below is unaffected; review the pull request directly for the notes.
         </p>`, C.GREY);
 
+  // Source line for each PR, then its articles in full.
+  const prHeader = pr => panel(`
+      <p class="t-gold" style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GOLD_TEXT};">
+        PR #${esc(pr.number)} &middot; open ${esc(pr.age)} &middot; ${esc(pr.head && pr.head.ref || '')}
+      </p>
+      <p class="t-title" style="margin:0 0 12px;font:700 17px/1.35 Georgia,'Times New Roman',serif;color:${C.NAVY_900};">${esc(pr.title)}</p>
+      <a href="${esc(pr.html_url)}" class="t-link" style="font:600 13px/1.4 Arial,Helvetica,sans-serif;color:${C.NAVY_900};text-decoration:underline;">Review and merge on GitHub &rarr;</a>
+    `);
+
+  let printed = 0;
+  const overflow = [];
+  const body = `
+    <p class="t-body" style="margin:0 0 18px;font:400 15px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">${intro}</p>
+    ${aside}
+    ${prs.map(pr => prHeader(pr) + pr.articles.map((a, i) => {
+      if (printed >= fullCount) { overflow.push(a); return ''; }
+      printed++;
+      return draftArticleHtml(a, { index: i + 1, total: pr.articles.length, prNumber: pr.number });
+    }).join('')).join('')}
+    ${overflow.length ? callout('Not shown here', `
+      <p class="t-body" style="margin:0 0 8px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
+        ${plural(overflow.length, 'further draft')} would have pushed this message past the size at which
+        Gmail truncates it. ${overflow.length === 1 ? 'It is' : 'They are'} in the attached PDF in full:
+      </p>
+      <ul class="t-body" style="margin:0;padding-left:20px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
+        ${overflow.map(a => `<li style="margin:0 0 5px;">${esc(a.title)}</li>`).join('')}
+      </ul>`, C.GREY) : ''}`;
+
   return emailShell({
-    title: 'Ledger drafts awaiting publish',
+    title: 'Ledger drafts ready for review',
     preheader,
-    eyebrow: 'The Ledger · draft alert',
+    eyebrow: 'The Ledger · weekly draft review',
     headline,
     dateLine: generatedOn,
     bodyHtml: body,
-    asideHtml: aside,
     cta: {
       href: prs[0].html_url,
       label: 'Open the pull request',
-      lead: 'Ready to publish?',
+      lead: 'Happy with it?',
       caption: 'Merging deploys to jparkassociates.com automatically.',
     },
-    footNote: `Internal automation &mdash; you&rsquo;ll get this once a day until the pull request is merged or closed.<br />
+    footNote: `Internal automation &mdash; sent Monday mornings while a Ledger draft is awaiting review.<br />
       <a href="https://github.com/${esc(REPO)}/blob/main/.github/workflows/ledger-draft-alert.yml" class="t-link" style="color:${C.GREY};">ledger-draft-alert.yml</a>`,
   });
+}
+
+/**
+ * Render the email, shrinking it until Gmail will not clip it.
+ *
+ * Gmail hides everything past ~102 KB behind a "View entire message" link. A
+ * clipped review email is a review email that does not get read, so when the
+ * drafts are long the later ones drop to a one-line entry and stay whole in the
+ * attached PDF. A single article that blows the budget on its own is still sent
+ * complete — clipping one long draft beats sending half of it.
+ */
+function fitEmailHtml(prs, generatedOn, att) {
+  const total = prs.reduce((n, pr) => n + pr.articles.length, 0);
+  for (let full = total; full >= 1; full--) {
+    const html = buildEmailHtml(prs, generatedOn, att, full);
+    if (Buffer.byteLength(html) <= GMAIL_CLIP_BYTES || full === 1) {
+      if (full < total) {
+        console.log(`::warning::Email body too large for ${total} full drafts; printed ${full} in full, ` +
+                    `the rest are listed and remain complete in the PDF.`);
+      }
+      if (Buffer.byteLength(html) > GMAIL_CLIP_BYTES) {
+        console.log(`::warning::Email body is ${Math.round(Buffer.byteLength(html) / 1024)} KB even with a single ` +
+                    'draft in full; Gmail may clip it. Sent whole rather than truncated.');
+      }
+      return html;
+    }
+  }
+  return buildEmailHtml(prs, generatedOn, att, 0);
 }
 
 function buildHtml(prs, generatedOn) {
@@ -423,11 +556,6 @@ ${general}
 
 /* ---------- main --------------------------------------------------------- */
 
-const ageLabel = (iso) => {
-  const hours = Math.round((Date.now() - Date.parse(iso)) / 36e5);
-  return hours >= 48 ? `${Math.round(hours / 24)}d` : `${hours}h`;
-};
-
 async function main() {
   const prs = JSON.parse(await fs.readFile(process.env.DRAFTS_JSON, 'utf8'));
   if (!prs.length) {
@@ -435,18 +563,24 @@ async function main() {
     return;
   }
 
-  const generatedOn = new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'full', timeZone: 'America/Los_Angeles',
-  }).format(new Date());
+  const generatedOn = todayLong();
   const withAge = list => list.map(pr => ({ ...pr, age: ageLabel(pr.created_at) }));
 
   // Write a branded email body up front, before any of the work that can fail.
   // If this process dies later, the alert still goes out looking like us — it
   // just says the packet is missing. The body is rewritten with the full
   // article list once the PDF is actually on disk.
+  // The Word review note is built by a separate, browser-free step that runs
+  // first, so by now it is either on disk or it failed. Ask the disk rather
+  // than assuming: the email must never name an attachment that isn't there.
+  const docxOnDisk = async () => {
+    if (!process.env.DOCX_PATH) return false;
+    try { return (await fs.stat(process.env.DOCX_PATH)).size > 0; } catch { return false; }
+  };
   const writeEmail = async (list, hasPdf) => {
     if (!process.env.EMAIL_HTML_OUT) return;
-    await fs.writeFile(process.env.EMAIL_HTML_OUT, buildEmailHtml(list, generatedOn, hasPdf));
+    const att = { pdf: hasPdf, docx: await docxOnDisk() };
+    await fs.writeFile(process.env.EMAIL_HTML_OUT, fitEmailHtml(list, generatedOn, att));
   };
   await writeEmail(withAge(prs).map(pr => ({ ...pr, articles: [] })), false);
 
