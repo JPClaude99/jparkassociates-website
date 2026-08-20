@@ -30,15 +30,39 @@ export function parseNotes(body) {
   const order   = new Map();
   const titles  = new Map();
   const general = [];
-  if (!body || !body.trim()) return { byFile, order, titles, general };
+  // String(), not a truthiness check: `body` is string|null from the API, but a
+  // malformed handoff carrying a number used to throw `body.trim is not a
+  // function` and take the PDF, the Word note and the article copy with it.
+  const src = String(body ?? '');
+  if (!src.trim()) return { byFile, order, titles, general };
 
-  // Split on level-2 headings, keeping each heading with its section.
-  const sections = body.split(/\n(?=##\s)/g);
+  /* Split on level-2 headings — but NOT on a `##` inside a fenced code block.
+     A run note that quotes this very PR-body format in a ```md fence used to be
+     torn into a fake article section and bound to a file that does not exist,
+     inventing a draft that was never written. */
+  const sections = [];
+  let current = [];
+  let fence = null;
+  for (const line of src.split('\n')) {
+    const f = line.match(/^\s*(```+|~~~+)/);
+    if (f) {
+      if (!fence) fence = f[1][0];
+      else if (line.trim().startsWith(fence)) fence = null;
+    }
+    if (!fence && /^##\s/.test(line) && current.length) {
+      sections.push(current.join('\n'));
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length) sections.push(current.join('\n'));
   for (const section of sections) {
     const headingMatch = section.match(/^##\s+(.+?)\s*$/m);
     // Closing hashes are optional in ATX, so "## 1. Title ##" must not title
-    // the article "Title ##".
-    const heading = headingMatch ? headingMatch[1].replace(/\s*#+\s*$/, '').trim() : '';
+    // the article "Title ##". CommonMark requires whitespace before the closing
+    // run, which is what keeps "## 1. Schedule K-1 box 17 code AC#" intact —
+    // that trailing # is part of the title, and GitHub renders it.
+    const heading = headingMatch ? headingMatch[1].replace(/\s+#+\s*$/, '').trim() : '';
     const rest    = headingMatch ? section.slice(headingMatch[0].length) : section;
 
     // A per-article section names its file in backticks near the top.

@@ -60,6 +60,11 @@ name: Ledger draft review
 #   • The de-duplication lock fails OPEN. If the cache service is unreachable
 #     the record reads empty and the email goes out — a duplicate is an
 #     annoyance, a missed review is a week of lost work.
+#   • A review that reaches the inbox WITHOUT the article text does not mark
+#     the week done, so the floor tries again. If the first attempt was
+#     degraded and the second succeeds, the reviewer gets two emails that week
+#     — deliberately. Two alerts beat one alert and no review, and with only
+#     two triggers in a week it cannot go further than that.
 #   • The lock lives in a BRANCH-SCOPED Actions cache, so a manual dispatch
 #     from any ref other than the default branch would neither see nor write
 #     the record the scheduled runs use, and would duplicate. That case is
@@ -207,11 +212,12 @@ jobs:
               head: { sha: p.head.sha, ref: p.head.ref },
               created_at: p.created_at,
             }))));
-            // The record this run WOULD write. Copied into place only after the
-            // email is actually away, so a run that dies mid-build leaves the
+            // What the week already had. The record this run writes is this
+            // list plus the drafts whose text actually reached the inbox — the
+            // builder decides that, not this step. Written into place only
+            // after the email is away, so a run that dies mid-build leaves the
             // record untouched and the next trigger finishes the job.
-            fs.writeFileSync('${{ runner.temp }}/pending.json',
-                             JSON.stringify([...new Set([...sent, ...drafts.map(keyOf)])]));
+            fs.writeFileSync('${{ runner.temp }}/prev.json', JSON.stringify(sent));
 
             if (drafts.length) {
               core.notice(`Ledger drafts awaiting review: ${drafts.map(p => '#' + p.number).join(', ')}`);
@@ -277,6 +283,7 @@ jobs:
           OUT_PATH: ${{ runner.temp }}/ledger-drafts.pdf
           DOCX_PATH: ${{ runner.temp }}/Ledger-review-notes.docx
           EMAIL_HTML_OUT: ${{ runner.temp }}/email.html
+          CARRIED_OUT: ${{ runner.temp }}/carried.json
         run: node automation/ledger-draft-pdf.mjs
 
       # Decide from what is actually on disk, not from either build's exit code —
@@ -314,7 +321,7 @@ jobs:
           else
             cov='The full text of each draft is in the HTML version of this email.'
           fi
-          echo "coverage=$cov" >> "$GITHUB_OUTPUT
+          echo "coverage=$cov" >> "$GITHUB_OUTPUT"
           echo "pdf=$([ -s "$pdf" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
           echo "docx=$([ -s "$docx" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
           [ -s "$html" ] || echo "::warning::No branded HTML body this run — the drafts could not be rendered. Falling back to plain text."
@@ -343,23 +350,42 @@ jobs:
             // "not live yet" — which ledger-published.yml has just contradicted.
             // Send nothing, and leave the record unwritten so the next run
             // rebuilds from what is actually open.
-            const merged = states.filter(s => s.merged);
-            // Closed WITHOUT merging is different: nothing in the email becomes
-            // untrue, the draft was simply rejected. Muting the whole review for
-            // it used to cost the surviving drafts a full week, silently and on
-            // a green run.
+            const merged   = states.filter(s => s.merged);
             const rejected = states.filter(s => s.state === 'closed' && !s.merged);
-            const live = states.filter(s => s.state !== 'closed');
+            const live     = states.filter(s => s.state !== 'closed');
             core.setOutput('open', merged.length || !live.length ? 'no' : 'yes');
-            if (merged.length) {
-              core.warning(`${merged.map(s => '#' + s.number).join(', ')} merged while this run was ` +
-                           `building, so the review it built says "not live yet" about an article that ` +
-                           `is. Not sending; the record stays unwritten and the next run rebuilds.`);
-            } else if (!live.length) {
-              core.warning('Every draft was closed while this run was building; nothing left to review.');
+
+            if (merged.length && !live.length) {
+              // Everything got published while we built. Clean no-op.
+              core.notice(`Every draft merged while this run was building; ledger-published.yml has ` +
+                          `the announcement. Nothing to review.`);
+            } else if (merged.length) {
+              // The body, the PDF and the Word note all say these drafts are
+              // "not live yet", which ledger-published.yml has just contradicted
+              // for the merged one. The artifacts cannot be amended at this
+              // point, so nothing is sent — and because the surviving drafts
+              // lose their slot, this FAILS rather than passing green. A silent
+              // week of no review is the outcome this workflow exists to
+              // prevent; a red run at least emails the admin.
+              core.setFailed(
+                `${merged.map(s => '#' + s.number).join(', ')} merged while this run was building, so ` +
+                `the review it built is out of date and was not sent. ` +
+                `${live.map(s => '#' + s.number).join(', ')} still need review — re-run this workflow ` +
+                `to rebuild and send. The send record was not written, so nothing is locked out.`);
             } else if (rejected.length) {
-              core.warning(`${rejected.map(s => '#' + s.number).join(', ')} closed unmerged while this ` +
-                           `run was building; sending the review for the ${live.length} still open.`);
+              // Nothing here contradicts the publish notice, so the review still
+              // goes out for the drafts that survive — muting it used to cost
+              // them a full week. But the subject line, the plain-text list, the
+              // PDF and the Word note were all built before the close and still
+              // present the rejected draft as awaiting review, so the email says
+              // so plainly rather than letting the reader trust a stale count.
+              const names = rejected.map(s => '#' + s.number).join(', ');
+              core.setOutput('note',
+                `NOTE: ${names} ${rejected.length === 1 ? 'was' : 'were'} closed without merging while ` +
+                `this email was being prepared. Ignore ${rejected.length === 1 ? 'it' : 'them'} below — ` +
+                `the count, the attachments and the list were built moments earlier.`);
+              core.warning(`${names} closed unmerged during the build; sending the review for the ` +
+                           `${live.length} still open, with a correction note.`);
             }
 
       - name: Email the weekly review
@@ -382,6 +408,7 @@ jobs:
             ${{ steps.find.outputs.body }}
 
             ${{ steps.mail.outputs.coverage }}
+            ${{ steps.recheck.outputs.note }}
             ${{ steps.mail.outputs.pdf == 'yes'
                 && 'Attached: ledger-drafts.pdf — each draft as it will read on the site, with reviewer notes after it.'
                 || 'The PDF review packet could not be built this run; see the Actions log.' }}
@@ -406,18 +433,33 @@ jobs:
       # never see the articles at all. Two degraded alerts beat one degraded
       # alert and no review, and there are only two triggers in a week, so this
       # cannot loop.
+      # PER DRAFT, not per run. Gating the whole record on "did this email carry
+      # any article at all" locked out a draft whose own article failed to
+      # render whenever a sibling's succeeded: recorded as reviewed, delivered
+      # as a bare link, and shut out for the rest of the week. The builder
+      # writes the list of pull requests whose text actually reached the inbox,
+      # and only those are recorded.
       - name: Record what went out
         id: record
         if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
+        continue-on-error: true       # the email is already away; a lost record costs a duplicate
         run: |
-          if [ "${{ steps.mail.outputs.articles }}" = "0" ]; then
-            echo "::warning::This review carried no article text, so the week is NOT marked done; the next run will try again."
+          prev='${{ runner.temp }}/prev.json'
+          carried='${{ runner.temp }}/carried.json'
+          if [ ! -s "$carried" ]; then
+            echo "::warning::No draft's text reached this email, so the week is NOT marked done; the next run will try again."
             echo "keep=no" >> "$GITHUB_OUTPUT"
-          else
-            mkdir -p '${{ runner.temp }}/ledger-sent'
-            cp '${{ runner.temp }}/pending.json' '${{ runner.temp }}/ledger-sent/sent.json'
-            echo "keep=yes" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          mkdir -p '${{ runner.temp }}/ledger-sent'
+          node -e '
+            const fs = require("fs");
+            const read = p => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return []; } };
+            const merged = [...new Set([...read(process.argv[1]), ...read(process.argv[2]).map(String)])];
+            fs.writeFileSync(process.argv[3], JSON.stringify(merged));
+            console.log("Recorded as reviewed this week:", merged.join(", ") || "(none)");
+          ' "$prev" "$carried" '${{ runner.temp }}/ledger-sent/sent.json'
+          echo "keep=yes" >> "$GITHUB_OUTPUT"
 
       # Cache entries are immutable, so each write takes a fresh key and the
       # restore-keys prefix above picks up the most recent one for the week.

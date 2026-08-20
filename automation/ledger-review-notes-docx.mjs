@@ -60,10 +60,13 @@ const HAIRLINE = 'E8E2D6';    // the same hairline as emails/_template.html
    unpaired surrogates with them, at the point the data enters this file. */
 const XML_ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-const xmlSafe = v =>
+const xmlSafe = (v, depth = 0) =>
   typeof v === 'string' ? v.replace(XML_ILLEGAL, '').replace(LONE_SURROGATE, '\uFFFD')
-  : Array.isArray(v) ? v.map(xmlSafe)
-  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, xmlSafe(x)]))
+  // A depth floor: the real handoff is two levels deep, and unbounded recursion
+  // over arbitrary parsed JSON blew the stack rather than writing a document.
+  : depth > 12 ? v
+  : Array.isArray(v) ? v.map(x => xmlSafe(x, depth + 1))
+  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, xmlSafe(x, depth + 1)]))
   : v;
 
 const SERIF = 'Georgia', SANS = 'Arial';
@@ -109,31 +112,48 @@ async function prArticleFiles(number) {
  */
 function runs(md, base = {}) {
   const out = [];
-  // The URL alternative allows ONE level of balanced parentheses, because real
-  // government URLs have them — .../wiki/Tax_(disambiguation), and CDTFA and
-  // IRS publication anchors do the same. A plain [^)]+ stops at the inner
-  // paren, producing a dead link and leaking the stray ")" into the sentence.
-  const re = /(\*\*|__)(.+?)\1|(\*|_)(?!\s)(.+?)(?<!\s)\3|`([^`]+)`|\[([^\]]*)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)/gs;
+  /* Notes on the alternatives, each of which was a bug first:
+     - `_` emphasis is guarded against word characters on both sides. GFM
+       refuses intraword `_`, and marked (which renders the PDF) obeys that;
+       without the guard `blog/september_15_2026.html` came out of the Word
+       note as `blog/september152026.html` and `LEDGER_ALERT_SMTP_USER` as
+       `LEDGERALERTSMTPUSER` — a working note naming a file that does not exist.
+     - The URL allows ONE level of balanced parentheses, because real government
+       URLs have them: .../wiki/Tax_(disambiguation), and IRS and CDTFA
+       publication anchors do the same. A plain [^)]+ stops at the inner paren,
+       producing a dead link and leaking the stray ")" into the sentence. */
+  const re = new RegExp([
+    '\\*\\*(?<b1>.+?)\\*\\*',
+    '(?<![A-Za-z0-9_])__(?<b2>.+?)__(?![A-Za-z0-9_])',
+    '\\*(?!\\s)(?<i1>.+?)(?<!\\s)\\*',
+    '(?<![A-Za-z0-9_])_(?!\\s)(?<i2>.+?)(?<!\\s)_(?![A-Za-z0-9_])',
+    '`(?<code>[^`]+)`',
+    '\\[(?<text>[^\\]]*)\\]\\((?<url>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
+  ].join('|'), 'gs');
   let last = 0, m;
   const lit = t => { if (t) out.push(new TextRun({ text: t, font: SANS, size: pt(10), color: SLATE, ...base })); };
 
   while ((m = re.exec(md)) !== null) {
     lit(md.slice(last, m.index));
     last = m.index + m[0].length;
-    if (m[2] !== undefined) {
-      out.push(new TextRun({ text: m[2], font: SANS, size: pt(10), color: NAVY_900, ...base, bold: true }));
-    } else if (m[4] !== undefined) {
-      out.push(new TextRun({ text: m[4], font: SANS, size: pt(10), color: SLATE, ...base, italics: true }));
-    } else if (m[5] !== undefined) {
-      out.push(new TextRun({ text: m[5], font: 'Consolas', size: pt(9.5), color: NAVY_700, ...base }));
+    const g = m.groups;
+    const bold = g.b1 ?? g.b2, ital = g.i1 ?? g.i2;
+    if (bold !== undefined) {
+      out.push(new TextRun({ text: bold, font: SANS, size: pt(10), color: NAVY_900, ...base, bold: true }));
+    } else if (ital !== undefined) {
+      out.push(new TextRun({ text: ital, font: SANS, size: pt(10), color: SLATE, ...base, italics: true }));
+    } else if (g.code !== undefined) {
+      out.push(new TextRun({ text: g.code, font: 'Consolas', size: pt(9.5), color: NAVY_700, ...base }));
     } else {
-      const [, , , , , , text, url] = m;
+      // Recurse into the link text so **bold** and `code` inside a link render
+      // as bold and code, not as literal asterisks and backticks. The doc
+      // comment above has always claimed this; now it is true. Link text
+      // cannot contain a bracket, so this cannot recurse more than once.
+      const style = { ...base, color: NAVY_700, underline: { type: 'single', color: NAVY_700 } };
       out.push(new ExternalHyperlink({
-        link: url,
-        children: [new TextRun({
-          text: text || url, font: SANS, size: pt(10), color: NAVY_700,
-          underline: { type: 'single', color: NAVY_700 }, ...base,
-        })],
+        link: g.url,
+        children: g.text ? runs(g.text, style)
+                         : [new TextRun({ text: g.url, font: SANS, size: pt(10), ...style })],
       }));
     }
   }

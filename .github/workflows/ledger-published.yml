@@ -39,19 +39,22 @@ permissions:
   contents: read
   pull-requests: read
 
-# One publish notice at a time, repo-wide, and queued rather than cancelled —
-# the send is the last step, so cancelling mid-flight could kill a notice that
-# was already half out the door.
+# PER PULL REQUEST, and this must stay per pull request.
 #
-# Deliberately NOT keyed on the pull request. A workflow-level expression is
-# evaluated from the raw event before any step runs, so it cannot use the
-# sanitised number below: a dispatch typed as "#42" grouped as
-# `ledger-published-#42` and never matched the merge path's `ledger-published-42`,
-# which is exactly the collision the group existed to prevent. These runs are
-# rare and take under a minute, so serialising all of them costs nothing and
-# cannot be talked out of matching.
+# A single repo-wide group looks tidier and silently loses mail: GitHub keeps at
+# most ONE pending run per group and cancels the previously pending one, so a
+# reviewer working through the weekly review email and merging #40, #41 and #42
+# in the same minute gets notices for #40 and #42 while #41's is cancelled
+# outright. Cancelled is not failed, so nobody is emailed about it either — the
+# article is live and unannounced. Keyed per pull request, all three run.
+#
+# `pull_request.number` is read first so the automatic path always groups on a
+# real integer. A dispatch typed as "#42" therefore lands in its own group
+# rather than joining `ledger-published-42`; the cost is that a manual re-send
+# is not serialised against a merge of the same PR, which is a possible
+# duplicate — strictly better than a possible silent drop.
 concurrency:
-  group: ledger-published
+  group: ledger-published-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
   cancel-in-progress: false
 
 jobs:

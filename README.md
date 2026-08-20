@@ -100,6 +100,12 @@ merging/sending.**
   Both come from **The Ledger Bot &lt;marketing@jparkassociates.com&gt;** via the
   single sender in `.github/actions/send-ledger-email` — no workflow can send
   Ledger mail as anyone else.
+
+  Run `python3 automation/lint-workflows.py` after editing any workflow. A YAML
+  file parses happily with an unterminated quote inside a `run:` block; the
+  shell only finds out when the step executes, and a broken step in this chain
+  means an email that silently never arrives. The linter runs `bash -n` over
+  every `run:` block.
 - **Monthly client emails** (23rd): follows `automation/EMAILS.md` — drafts
   next month's "Monthly Close" email per active segment in
   `emails/segments.json`, opens a `[Monthly email]` PR. Justin reviews,

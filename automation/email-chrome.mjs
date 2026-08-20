@@ -218,12 +218,22 @@ const listHtml = (items, ordered) => {
 };
 
 /** A real table, because a rate table flattened into a paragraph is unreadable
-    — "1120-SSep 15Sep 15" is not a deadline anyone can act on. */
+    — "1120-SSep 15Sep 15" is not a deadline anyone can act on.
+    Cells arrive as {html, colspan, rowspan}: a merged header cell that loses
+    its span shifts every value in the row one column left, which is how a
+    California date ends up printed under "Form". */
 const tableHtml = rows => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;border-collapse:collapse;">
-      ${rows.map(r => `<tr>${r.cells.map(c => `
-        <${r.header ? 'th' : 'td'} class="${r.header ? 't-strong' : 't-body'}" align="left" valign="top"
-            ${r.header ? `bgcolor="${C.CREAM}"` : ''} style="${r.header ? `background-color:${C.CREAM};font:700 13px/1.5 Arial,Helvetica,sans-serif;color:${C.NAVY_900};` : `font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${C.SLATE};`}border:1px solid #e8e2d6;padding:8px 10px;">${c}</${r.header ? 'th' : 'td'}>`).join('')}</tr>`).join('')}
+      ${rows.map(r => `<tr>${r.cells.map(cell => {
+        const c = typeof cell === 'string' ? { html: cell, colspan: 1, rowspan: 1 } : cell;
+        const tag = r.header ? 'th' : 'td';
+        const span = `${c.colspan > 1 ? ` colspan="${c.colspan}"` : ''}${c.rowspan > 1 ? ` rowspan="${c.rowspan}"` : ''}`;
+        const style = r.header
+          ? `background-color:${C.CREAM};font:700 13px/1.5 Arial,Helvetica,sans-serif;color:${C.NAVY_900};`
+          : `font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${C.SLATE};`;
+        return `<${tag} class="${r.header ? 't-strong' : 't-body'}" align="left" valign="top"${span}` +
+               `${r.header ? ` bgcolor="${C.CREAM}"` : ''} style="${style}border:1px solid #e8e2d6;padding:8px 10px;">${c.html}</${tag}>`;
+      }).join('')}</tr>`).join('')}
     </table>`;
 
 const preHtml = text => `
@@ -250,7 +260,13 @@ const actionHtml = (heading, items, lead = []) => `
       </td>
     </tr></table>`;
 
-const flat = items => items.map(i => (typeof i === 'string' ? i : i.html));
+/* Indent a nested item rather than flattening it. listHtml was fixed to honour
+   depth and these two call sites were not, so a sub-step of an action item read
+   as its own action and a sub-source read as a sibling citation. */
+const indent = i => (typeof i === 'string' ? i : (i.depth
+  ? `<span style="padding-left:${i.depth * 16}px;display:inline-block;">&#8250; ${i.html}</span>`
+  : i.html));
+const flat = items => items.map(indent);
 
 const sourcesHtml = (label, items) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
