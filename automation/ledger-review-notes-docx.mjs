@@ -40,13 +40,39 @@ const API  = process.env.GITHUB_API_URL || 'https://api.github.com';
 const REPO = process.env.GITHUB_REPOSITORY;
 const OUT  = process.env.DOCX_OUT || 'Ledger-review-notes.docx';
 
-/* Same palette as the email and the PDF — see email-chrome.mjs. */
+/* Same palette as the email and the PDF, used the same way — read the header
+   note in email-chrome.mjs before changing any of it. Two rules bite here:
+   GOLD_RULE is a surface and never type, and gold ON NAVY is GOLD_PILL. The
+   masthead used to set GOLD_RULE as type on the navy band, which is precisely
+   what that note forbids. Every value below is a token from email-chrome.mjs;
+   nothing is invented locally. */
 const NAVY = '111C33', NAVY_900 = '1B2A4A', NAVY_700 = '2E4A7A';
-const GOLD = 'C9A84C', GOLD_TEXT = '7E6015';
-const CREAM = 'F5F0E8', SLATE = '3A4660', GREY = '5C6577', WHITE = 'FFFFFF';
+const GOLD_RULE = 'C9A84C';   // rules and borders only — never type
+const GOLD_TEXT = '7E6015';   // gold type on a light ground
+const GOLD_PILL = 'F0DCA8';   // gold type on navy
+const CREAM = 'F5F0E8', SLATE = '3A4660', GREY = '5C6577';
+const HAIRLINE = 'E8E2D6';    // the same hairline as emails/_template.html
+
+/* XML 1.0 has no representation for most C0 control characters — not even as
+   a numeric entity — so one stray \x0c anywhere in a PR body produces a .docx
+   that is a valid zip full of unparseable XML. The zip opens, nothing errors,
+   and the reviewer gets "Word found unreadable content." Strip them, and strip
+   unpaired surrogates with them, at the point the data enters this file. */
+const XML_ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const xmlSafe = v =>
+  typeof v === 'string' ? v.replace(XML_ILLEGAL, '').replace(LONE_SURROGATE, '\uFFFD')
+  : Array.isArray(v) ? v.map(xmlSafe)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, xmlSafe(x)]))
+  : v;
 
 const SERIF = 'Georgia', SANS = 'Arial';
 const pt = n => n * 2;                 // docx sizes are half-points
+/* Letter-spacing, in twentieths of a point. The canonical eyebrow is 3px on
+   11px type = 0.27em (emails/_template.html). Word takes an absolute measure
+   rather than an em, so the ratio has to be recomputed per size — these are
+   0.27em at 8pt and at 7.5pt. */
+const TRACK_8 = 44, TRACK_75 = 41;
 
 /* ---------- GitHub ------------------------------------------------------- */
 
@@ -83,7 +109,11 @@ async function prArticleFiles(number) {
  */
 function runs(md, base = {}) {
   const out = [];
-  const re = /(\*\*|__)(.+?)\1|(\*|_)(?!\s)(.+?)(?<!\s)\3|`([^`]+)`|\[([^\]]*)\]\(([^)\s]+)[^)]*\)/gs;
+  // The URL alternative allows ONE level of balanced parentheses, because real
+  // government URLs have them — .../wiki/Tax_(disambiguation), and CDTFA and
+  // IRS publication anchors do the same. A plain [^)]+ stops at the inner
+  // paren, producing a dead link and leaking the stray ")" into the sentence.
+  const re = /(\*\*|__)(.+?)\1|(\*|_)(?!\s)(.+?)(?<!\s)\3|`([^`]+)`|\[([^\]]*)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)/gs;
   let last = 0, m;
   const lit = t => { if (t) out.push(new TextRun({ text: t, font: SANS, size: pt(10), color: SLATE, ...base })); };
 
@@ -129,9 +159,13 @@ const bullet = (md, ordered, level) => new Paragraph({
 /** A markdown table -> a bordered Word table. Alignment rows are dropped. */
 function mdTable(lines) {
   const cells = l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
-  const rows = lines.filter(l => !/^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(l) || !/-/.test(l)).map(cells);
+  // Drop row 1 and only row 1. The caller has already established that it is
+  // the alignment row; filtering by shape instead deleted legitimate data rows
+  // such as `| - | - |`, which is how a notes table says "not applicable".
+  const rows = lines.map(cells);
+  if (rows.length > 1) rows.splice(1, 1);
   if (!rows.length) return [];
-  const border = { style: BorderStyle.SINGLE, size: 4, color: 'D8D2C6' };
+  const border = { style: BorderStyle.SINGLE, size: 4, color: HAIRLINE };
   return [new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     borders: { top: border, bottom: border, left: border, right: border,
@@ -167,6 +201,28 @@ function mdBlocks(md) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const t = line.trim();
+
+    // A fenced block is verbatim. Without this, `# comment` inside a code
+    // sample became a heading and `- item` became a bullet, and the fence
+    // markers printed as prose.
+    if (/^(```|~~~)/.test(t)) {
+      flush();
+      const fence = t.slice(0, 3);
+      const code = [];
+      for (i++; i < lines.length && !lines[i].trim().startsWith(fence); i++) code.push(lines[i]);
+      if (code.length) {
+        out.push(new Paragraph({
+          spacing: { after: 120 },
+          shading: { type: ShadingType.CLEAR, fill: CREAM },
+          indent: { left: 240, right: 240 },
+          children: code.flatMap((c, n) => [
+            ...(n ? [new TextRun({ break: 1 })] : []),
+            new TextRun({ text: c, font: 'Consolas', size: pt(9), color: NAVY_700 }),
+          ]),
+        }));
+      }
+      continue;
+    }
 
     if (!t) { flush(); continue; }
 
@@ -216,11 +272,11 @@ const eyebrow = (text, color = GOLD_TEXT) => new Paragraph({
   spacing: { after: 60 },
   children: [new TextRun({
     text: text.toUpperCase(), font: SANS, bold: true, size: pt(8),
-    color, characterSpacing: 60,
+    color, characterSpacing: TRACK_8,
   })],
 });
 
-const rule = (color = GOLD, size = 6) => new Paragraph({
+const rule = (color = GOLD_RULE, size = 6) => new Paragraph({
   spacing: { before: 60, after: 160 },
   border: { bottom: { style: BorderStyle.SINGLE, size, color, space: 1 } },
   children: [],
@@ -228,31 +284,37 @@ const rule = (color = GOLD, size = 6) => new Paragraph({
 
 /** The navy title block. Shading is on the paragraphs, so it survives export. */
 function masthead(draftCount, prCount) {
+  // Inset from the band edge the way the email masthead is inset from its navy
+  // panel — type flush against a shaded edge reads as a mistake.
   const band = (children, spacing) => new Paragraph({
     shading: { type: ShadingType.CLEAR, fill: NAVY },
+    indent: { left: 288, right: 288 },
     spacing,
     children,
   });
   return [
     band([new TextRun({ text: 'J PARK & ASSOCIATES · THE LEDGER', font: SANS, bold: true,
-                        size: pt(8), color: GOLD, characterSpacing: 80 })],
+                        size: pt(8), color: GOLD_PILL, characterSpacing: TRACK_8 })],
          { before: 240, after: 40 }),
+    // The only serif line in the document. This is the masthead — the role
+    // Georgia plays in the email. Everything under it is working paper, and
+    // ledger-draft-pdf.mjs is explicit that sans is what marks it as such.
     band([new TextRun({ text: 'Reviewer notes', font: SERIF, bold: true, size: pt(26), color: CREAM })],
          { after: 60 }),
-    band([new TextRun({ text: generatedOn(), font: SANS, size: pt(10), color: GOLD })],
+    band([new TextRun({ text: generatedOn(), font: SANS, size: pt(10), color: GOLD_PILL })],
          { after: 40 }),
     band([new TextRun({
       text: `${draftCount} draft${draftCount === 1 ? '' : 's'} across ` +
             `${prCount} pull request${prCount === 1 ? '' : 's'}  ·  NOT FOR PUBLICATION`,
-      font: SANS, bold: true, size: pt(8), color: GOLD, characterSpacing: 40,
+      font: SANS, bold: true, size: pt(8), color: GOLD_PILL, characterSpacing: TRACK_8,
     })], { after: 240 }),
     new Paragraph({
       spacing: { before: 200, after: 200 },
       children: runs(
         'These are the working notes behind this week’s Ledger drafts — the sources each ' +
         'article rests on, why it was drafted, and anything the scan hedged on. The articles ' +
-        'themselves are in the review email and the attached PDF. Mark this document up and ' +
-        'send it back, or merge the pull request if it reads right as it stands.'),
+        'themselves are in the review email and the attached PDF. Mark up anything that needs ' +
+        'changing and take it to the pull request, or merge as it stands if it reads right.'),
     }),
   ];
 }
@@ -274,13 +336,13 @@ function articleBlock(title, path, md) {
   return [
   new Paragraph({
     keepNext: true, spacing: { before: 320, after: 40 },
-    children: [new TextRun({ text: title, font: SERIF, bold: true, size: pt(15), color: NAVY_900 })],
+    children: [new TextRun({ text: title, font: SANS, bold: true, size: pt(14), color: NAVY_900 })],
   }),
   new Paragraph({
     keepNext: true, spacing: { after: 120 },
     children: [new TextRun({ text: meta, font: 'Consolas', size: pt(9), color: GREY })],
   }),
-  rule(GOLD, 4),
+  rule(GOLD_RULE, 4),
   ...(body.trim() ? mdBlocks(body) : [new Paragraph({
     spacing: { after: 120 },
     children: [new TextRun({
@@ -295,7 +357,10 @@ function articleBlock(title, path, md) {
 /* ---------- main --------------------------------------------------------- */
 
 async function main() {
-  const prs = JSON.parse(await fs.readFile(process.env.DRAFTS_JSON, 'utf8'));
+  const prs = xmlSafe(JSON.parse(await fs.readFile(process.env.DRAFTS_JSON, 'utf8')));
+  // A non-array would hit `.length === undefined` and exit 0, so a malformed
+  // handoff would look exactly like a quiet week with nothing to review.
+  if (!Array.isArray(prs)) throw new Error('DRAFTS_JSON did not contain an array of pull requests.');
   if (!prs.length) {
     console.log('No draft PRs supplied — no review note to write.');
     return;
@@ -324,17 +389,19 @@ async function main() {
       eyebrow(`Pull request #${pr.number} · open ${ageLabel(pr.created_at)}`),
       new Paragraph({
         keepNext: true, spacing: { after: 60 },
-        children: [new TextRun({ text: pr.title, font: SERIF, bold: true, size: pt(13), color: NAVY_900 })],
+        children: [new TextRun({ text: pr.title, font: SANS, bold: true, size: pt(12), color: NAVY_900 })],
       }),
       new Paragraph({
         spacing: { after: 60 },
         children: [
           new TextRun({ text: `branch ${pr.head && pr.head.ref || '—'}  ·  `, font: SANS, size: pt(9), color: GREY }),
-          new ExternalHyperlink({
-            link: pr.html_url,
-            children: [new TextRun({ text: pr.html_url, font: SANS, size: pt(9), color: NAVY_700,
-                                     underline: { type: 'single', color: NAVY_700 } })],
-          }),
+          ...(pr.html_url
+            ? [new ExternalHyperlink({
+                link: pr.html_url,
+                children: [new TextRun({ text: pr.html_url, font: SANS, size: pt(9), color: NAVY_700,
+                                         underline: { type: 'single', color: NAVY_700 } })],
+              })]
+            : [new TextRun({ text: '—', font: SANS, size: pt(9), color: GREY })]),
         ],
       }),
       rule(NAVY_700, 8),
@@ -362,6 +429,7 @@ async function main() {
 
   const doc = new Document({
     creator: 'The Ledger Bot',
+    lastModifiedBy: 'The Ledger Bot',   // else Word shows the library's "Un-named"
     title: 'The Ledger — reviewer notes',
     description: 'Working notes behind this week’s Ledger article drafts. Not for publication.',
     styles: {
@@ -381,12 +449,12 @@ async function main() {
       headers: {
         default: new Header({
           children: [new Paragraph({
-            border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: GOLD, space: 4 } },
+            border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: GOLD_RULE, space: 4 } },
             children: [
               new TextRun({ text: 'J PARK & ASSOCIATES', font: SANS, bold: true, size: pt(7.5),
-                            color: NAVY_900, characterSpacing: 60 }),
+                            color: NAVY_900, characterSpacing: TRACK_75 }),
               new TextRun({ text: '   ·   THE LEDGER · REVIEWER NOTES · NOT FOR PUBLICATION',
-                            font: SANS, bold: true, size: pt(7.5), color: GOLD_TEXT, characterSpacing: 60 }),
+                            font: SANS, bold: true, size: pt(7.5), color: GOLD_TEXT, characterSpacing: TRACK_75 }),
             ],
           })],
         }),
@@ -395,7 +463,7 @@ async function main() {
         default: new Footer({
           children: [new Paragraph({
             alignment: AlignmentType.CENTER,
-            border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D8D2C6', space: 4 } },
+            border: { top: { style: BorderStyle.SINGLE, size: 4, color: HAIRLINE, space: 4 } },
             children: [
               new TextRun({ text: '2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214  ·  (818) 248-1580  ·  Page ',
                             font: SANS, size: pt(8), color: GREY }),

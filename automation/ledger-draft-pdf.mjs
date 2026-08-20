@@ -46,7 +46,7 @@ import fs from 'node:fs/promises';
 import puppeteer from 'puppeteer';
 import { marked } from 'marked';
 import { C, esc, panel, callout, emailShell,
-         draftArticleHtml, GMAIL_CLIP_BYTES } from './email-chrome.mjs';
+         draftArticleHtml, htmlBudget } from './email-chrome.mjs';
 import { parseNotes, ageLabel, generatedOn as todayLong } from './ledger-notes.mjs';
 
 const API   = process.env.GITHUB_API_URL || 'https://api.github.com';
@@ -56,6 +56,18 @@ const OUT   = process.env.OUT_PATH || 'ledger-drafts.pdf';
 const SITE  = 'https://jparkassociates.com/blog/';
 
 marked.setOptions({ gfm: true, breaks: false });
+
+/* PR bodies are written by an agent and reviewed by nobody before this runs,
+   and `marked` passes raw HTML straight through. A single <style> line in a
+   reviewer note set `body{display:none}` on the packet document and rendered a
+   9 KB PDF with nothing on any page but the footer; a <script> would execute
+   inside the render.
+
+   Escaping only `<` is exactly enough and nothing more: HTML needs it, and
+   marked leaves `&` and existing entities alone, so `Revenue < $50,000` still
+   renders as `<`, `&amp;` still renders as `&`, and tables, links and emphasis
+   are untouched. Verified against all six cases. */
+const mdSafe = md => String(md ?? '').replace(/</g, '&lt;');
 
 /* ---------- GitHub ------------------------------------------------------- */
 
@@ -102,7 +114,10 @@ const fileAtRef = (path, ref) =>
 
 async function extractArticle(page, html) {
   await page.setContent(html, { waitUntil: 'domcontentloaded' });
-  return page.evaluate((base) => {
+  // The palette crosses into the page rather than being re-typed as literals
+  // there: a hex hard-coded inside page.evaluate cannot be found by a search
+  // for C.NAVY_900, and drifts from the token in silence.
+  return page.evaluate((base, P) => {
     const hero = document.querySelector('.article-hero');
     const body = document.querySelector('.article-body .container-narrow');
     if (!body) return null;
@@ -136,33 +151,90 @@ async function extractArticle(page, html) {
     const escHtml = t => String(t).replace(/[&<>"]/g, c =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-    // Inline level: keep emphasis and links, unwrap everything else to text.
-    const inline = (node) => {
+    /* Inline level: keep emphasis and links, unwrap everything else to text.
+       `onNavy` is not optional decoration. The action list is a navy block, and
+       the site says so itself — blog.css: `.action-list a { color: gold-300 }`.
+       Emitting the light-ground navy here regardless would paint every URL and
+       every bolded figure #1B2A4A on a #1B2A4A ground: 1.00:1, gone. Gmail's
+       dark mode would repaint them via .t-link/.t-strong and hide the bug from
+       anyone who reads their mail dark. */
+    const inline = (node, onNavy) => {
       let out = '';
+      const link   = onNavy ? P.GOLD_PILL : P.NAVY_900;
+      const strong = onNavy ? P.CREAM     : P.NAVY_900;
+      const mono   = onNavy ? P.CREAM     : P.SLATE;
       for (const n of node.childNodes) {
         if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
         if (n.nodeType !== 1) continue;
         switch (n.tagName) {
           case 'BR':     out += '<br />'; break;
-          case 'A':      out += `<a class="t-link" href="${escHtml(n.getAttribute('href') || '')}" style="color:#1B2A4A;text-decoration:underline;">${inline(n)}</a>`; break;
+          case 'A':      out += `<a class="t-link" href="${escHtml(n.getAttribute('href') || '')}" style="color:${link};text-decoration:underline;">${inline(n, onNavy)}</a>`; break;
           case 'STRONG':
-          case 'B':      out += `<strong class="t-strong" style="color:#1B2A4A;font-weight:700;">${inline(n)}</strong>`; break;
+          case 'B':      out += `<strong class="t-strong" style="color:${strong};font-weight:700;">${inline(n, onNavy)}</strong>`; break;
           case 'EM':
-          case 'I':      out += `<em>${inline(n)}</em>`; break;
-          case 'CODE':   out += `<code style="font-family:Consolas,Menlo,monospace;font-size:13px;">${inline(n)}</code>`; break;
-          case 'SUP':    out += `<sup>${inline(n)}</sup>`; break;
-          case 'SUB':    out += `<sub>${inline(n)}</sub>`; break;
+          case 'I':      out += `<em>${inline(n, onNavy)}</em>`; break;
+          case 'CODE':   out += `<code style="font-family:Consolas,Menlo,monospace;font-size:13px;color:${mono};">${inline(n, onNavy)}</code>`; break;
+          case 'SUP':    out += `<sup>${inline(n, onNavy)}</sup>`; break;
+          case 'SUB':    out += `<sub>${inline(n, onNavy)}</sub>`; break;
           case 'SCRIPT':
           case 'STYLE':  break;
-          default:       out += inline(n);   // span, and anything unexpected
+          // Block-level children are NOT inline content. Falling through to the
+          // default used to concatenate their text with no separators at all,
+          // turning a 3x3 rate table into "1120-SSep 15Sep 15". blocksOf()
+          // handles these; inline() must leave them alone.
+          case 'UL': case 'OL': case 'TABLE': case 'DL': case 'PRE': break;
+          default:       out += inline(n, onNavy);   // span, and anything unexpected
         }
       }
       return out;
     };
 
-    const items = el => {
-      const list = el && el.querySelector('ul, ol');
-      return list ? [...list.children].filter(li => li.tagName === 'LI').map(inline) : [];
+    /* Flatten a list, carrying nesting depth. A nested <ul> inside an <li> used
+       to be swallowed by inline() and appear as "Top oneNested ANested B" in a
+       single bullet. */
+    const listItems = (list, onNavy, depth = 0) => {
+      const out = [];
+      for (const li of list.children) {
+        if (li.tagName !== 'LI') continue;
+        out.push({ html: inline(li, onNavy), depth });
+        for (const sub of li.children) {
+          if (sub.tagName === 'UL' || sub.tagName === 'OL') out.push(...listItems(sub, onNavy, depth + 1));
+        }
+      }
+      return out;
+    };
+
+    /* EVERY list in the container, not just the first. `.action-list` and
+       `.sources-box` may hold more than one <ul>; querySelector kept only the
+       first, so a second block of source citations vanished from the email
+       while staying in the PDF. Never `.map(inline)` either — Array.map passes
+       the INDEX as the second argument, which would flip `onNavy` per item. */
+    const items = (el, onNavy) => {
+      if (!el) return [];
+      return [...el.querySelectorAll('ul, ol')]
+        .filter(l => !l.closest('li'))          // nested lists come via listItems
+        .flatMap(l => listItems(l, onNavy));
+    };
+
+    const tableBlock = (el) => {
+      const rows = [...el.querySelectorAll('tr')].map(tr => ({
+        header: [...tr.children].some(c => c.tagName === 'TH'),
+        cells: [...tr.children].filter(c => c.tagName === 'TH' || c.tagName === 'TD').map(c => inline(c, false)),
+      })).filter(r => r.cells.length);
+      return rows.length ? { kind: 'table', rows } : null;
+    };
+
+    const dlBlock = (el) => {
+      const out = [];
+      let term = '';
+      for (const c of el.children) {
+        if (c.tagName === 'DT') term = inline(c, false);
+        else if (c.tagName === 'DD') {
+          out.push({ html: term ? `<strong class="t-strong" style="color:${P.NAVY_900};font-weight:700;">${term}</strong> &mdash; ${inline(c, false)}` : inline(c, false), depth: 0 });
+          term = '';
+        }
+      }
+      return out.length ? { kind: 'list', ordered: false, items: out } : null;
     };
 
     const blocksOf = (root) => {
@@ -172,22 +244,33 @@ async function extractArticle(page, html) {
         switch (el.tagName) {
           case 'P':
             out.push(cls.contains('disclaimer')
-              ? { kind: 'disclaimer', html: inline(el) }
-              : { kind: 'p', html: inline(el) });
+              ? { kind: 'disclaimer', html: inline(el, false) }
+              : { kind: 'p', html: inline(el, false) });
             break;
           case 'H1':
           case 'H2': out.push({ kind: 'h2', text: el.textContent.trim() }); break;
           case 'H3':
-          case 'H4': out.push({ kind: 'h3', text: el.textContent.trim() }); break;
+          case 'H4':
+          case 'H5':
+          case 'H6': out.push({ kind: 'h3', text: el.textContent.trim() }); break;
           case 'UL':
           case 'OL':
-            out.push({ kind: 'list', ordered: el.tagName === 'OL',
-                       items: [...el.children].filter(li => li.tagName === 'LI').map(inline) });
+            out.push({ kind: 'list', ordered: el.tagName === 'OL', items: listItems(el, false) });
             break;
+          case 'TABLE': { const t = tableBlock(el); if (t) out.push(t); break; }
+          case 'DL':    { const d = dlBlock(el);    if (d) out.push(d); break; }
+          case 'PRE':   out.push({ kind: 'pre', text: el.textContent.replace(/\s+$/, '') }); break;
           case 'BLOCKQUOTE':
             out.push({ kind: 'callout', label: '', blocks: blocksOf(el) });
             break;
-          case 'FIGURE': case 'IMG': case 'SCRIPT': case 'STYLE': case 'HR':
+          // The raster is dropped on purpose; the caption is not. A figcaption
+          // routinely carries the only statement of what a chart shows.
+          case 'FIGURE': {
+            const cap = el.querySelector('figcaption');
+            if (cap && cap.textContent.trim()) out.push({ kind: 'disclaimer', html: inline(cap, false) });
+            break;
+          }
+          case 'IMG': case 'SCRIPT': case 'STYLE': case 'HR':
             break;                                   // no images in the packet
           case 'DIV': case 'SECTION': case 'ASIDE': {
             if (cls.contains('callout')) {
@@ -199,18 +282,30 @@ async function extractArticle(page, html) {
                          blocks: blocksOf(inner) });
             } else if (cls.contains('action-list')) {
               const h = el.querySelector('h2, h3, h4');
-              out.push({ kind: 'action', heading: h ? h.textContent.trim() : '', items: items(el) });
+              // Prose inside the block, not just the checklist. An action list
+              // that opens with a sentence used to lose it entirely.
+              const lead = [...el.children]
+                .filter(c => c.tagName === 'P' && c.textContent.trim())
+                .map(c => inline(c, true));
+              out.push({ kind: 'action', heading: h ? h.textContent.trim() : '',
+                         lead, items: items(el, true) });   // navy ground
             } else if (cls.contains('sources-box')) {
               const label = el.querySelector('.label');
               out.push({ kind: 'sources', label: label ? label.textContent.trim() : 'Sources',
-                         items: items(el) });
+                         items: items(el, false) });
             } else {
               out.push(...blocksOf(el));             // unknown wrapper: descend
             }
             break;
           }
           default: {
-            if (el.textContent.trim()) out.push({ kind: 'p', html: inline(el) });
+            // Descend into anything that holds block content rather than
+            // flattening it into one run-on paragraph.
+            if (el.querySelector(':scope > p, :scope > ul, :scope > ol, :scope > table, :scope > div, :scope > h2, :scope > h3')) {
+              out.push(...blocksOf(el));
+            } else if (el.textContent.trim()) {
+              out.push({ kind: 'p', html: inline(el, false) });
+            }
           }
         }
       }
@@ -227,7 +322,7 @@ async function extractArticle(page, html) {
       bodyHtml: body.innerHTML,
       blocks:   blocksOf(body),
     };
-  }, SITE);
+  }, SITE, { NAVY_900: C.NAVY_900, GOLD_PILL: C.GOLD_PILL, CREAM: C.CREAM, SLATE: C.SLATE });
 }
 
 /* ---------- rendering ---------------------------------------------------- */
@@ -268,6 +363,10 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
   // "0 drafts, written and waiting." headline.
   const all = prs.flatMap(pr => pr.articles.map(a => ({ ...a, pr })));
   const counted = all.length > 0;
+  // Drafts the PR contains that could not be rendered. Counting only what
+  // survived, and saying nothing about the rest, told the reviewer "2 drafts
+  // ready" when three had been written — with no hint the third existed.
+  const skipped = prs.flatMap(pr => (pr.skipped || []).map(path => ({ path, pr })));
 
   const headline  = counted ? `${plural(all.length, 'draft')} ready for review.`
                             : 'Drafts ready for review.';
@@ -290,13 +389,23 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
                  'the reviewer notes on their own — sources, reasoning and anything the scan hedged on — in Word, ready to mark up.'],
   ].filter(Boolean);
 
+  const missing = skipped.length ? callout('Could not be rendered', `
+      <p class="t-body" style="margin:0 0 8px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
+        ${skipped.length === 1 ? 'One further draft is' : `${skipped.length} further drafts are`} in the pull request but
+        could not be rendered for this email &mdash; see the Actions log. Read
+        ${skipped.length === 1 ? 'it' : 'them'} on GitHub before merging:
+      </p>
+      <ul class="t-body" style="margin:0;padding-left:20px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
+        ${skipped.map(x => `<li style="margin:0 0 5px;">${esc(x.path)} (PR #${esc(x.pr.number)})</li>`).join('')}
+      </ul>`, C.GREY) : '';
+
   const aside = enclosures.length
     ? callout('Attached', enclosures.map(([name, what]) => `
         <p class="t-body" style="margin:0 0 8px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
           <strong class="t-strong" style="color:${C.NAVY_900};">${esc(name)}</strong> &mdash; ${what}
         </p>`).join('') + `
         <p class="t-muted" style="margin:6px 0 0;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${C.GREY};">
-          Read either one anywhere; no GitHub needed.
+          Read ${enclosures.length > 1 ? 'either one' : 'it'} anywhere; no GitHub needed.
         </p>`)
     : callout('', `
         <p class="t-body" style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
@@ -307,7 +416,7 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
   // Source line for each PR, then its articles in full.
   const prHeader = pr => panel(`
       <p class="t-gold" style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GOLD_TEXT};">
-        PR #${esc(pr.number)} &middot; open ${esc(pr.age)} &middot; ${esc(pr.head && pr.head.ref || '')}
+        PR #${esc(pr.number)} &middot; open ${esc(pr.age)}${pr.head && pr.head.ref ? ` &middot; ${esc(pr.head.ref)}` : ''}
       </p>
       <p class="t-title" style="margin:0 0 12px;font:700 17px/1.35 Georgia,'Times New Roman',serif;color:${C.NAVY_900};">${esc(pr.title)}</p>
       <a href="${esc(pr.html_url)}" class="t-link" style="font:600 13px/1.4 Arial,Helvetica,sans-serif;color:${C.NAVY_900};text-decoration:underline;">Review and merge on GitHub &rarr;</a>
@@ -318,6 +427,7 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
   const body = `
     <p class="t-body" style="margin:0 0 18px;font:400 15px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">${intro}</p>
     ${aside}
+    ${missing}
     ${prs.map(pr => prHeader(pr) + pr.articles.map((a, i) => {
       if (printed >= fullCount) { overflow.push(a); return ''; }
       printed++;
@@ -326,13 +436,15 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
     ${overflow.length ? callout('Not shown here', `
       <p class="t-body" style="margin:0 0 8px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
         ${plural(overflow.length, 'further draft')} would have pushed this message past the size at which
-        Gmail truncates it. ${overflow.length === 1 ? 'It is' : 'They are'} in the attached PDF in full:
+        Gmail truncates it. ${att.pdf
+          ? `${overflow.length === 1 ? 'It is' : 'They are'} in the attached PDF in full:`
+          : `Read ${overflow.length === 1 ? 'it' : 'them'} in the pull request:`}
       </p>
       <ul class="t-body" style="margin:0;padding-left:20px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
         ${overflow.map(a => `<li style="margin:0 0 5px;">${esc(a.title)}</li>`).join('')}
       </ul>`, C.GREY) : ''}`;
 
-  return emailShell({
+  return `<!--ledger:articles=${all.length}-->\n` + emailShell({
     title: 'Ledger drafts ready for review',
     preheader,
     eyebrow: 'The Ledger · weekly draft review',
@@ -363,12 +475,12 @@ function fitEmailHtml(prs, generatedOn, att) {
   const total = prs.reduce((n, pr) => n + pr.articles.length, 0);
   for (let full = total; full >= 1; full--) {
     const html = buildEmailHtml(prs, generatedOn, att, full);
-    if (Buffer.byteLength(html) <= GMAIL_CLIP_BYTES || full === 1) {
+    if (Buffer.byteLength(html) <= htmlBudget() || full === 1) {
       if (full < total) {
         console.log(`::warning::Email body too large for ${total} full drafts; printed ${full} in full, ` +
                     `the rest are listed and remain complete in the PDF.`);
       }
-      if (Buffer.byteLength(html) > GMAIL_CLIP_BYTES) {
+      if (Buffer.byteLength(html) > htmlBudget()) {
         console.log(`::warning::Email body is ${Math.round(Buffer.byteLength(html) / 1024)} KB even with a single ` +
                     'draft in full; Gmail may clip it. Sent whole rather than truncated.');
       }
@@ -393,7 +505,7 @@ function buildHtml(prs, generatedOn) {
         ${prs.map(pr => `
           <li>
             <strong>${esc(pr.title)}</strong>
-            <span class="cover-pr">PR #${pr.number} &middot; branch <code>${esc(pr.head.ref)}</code> &middot; open ${esc(pr.age)}</span>
+            <span class="cover-pr">PR #${pr.number}${pr.head && pr.head.ref ? ` &middot; branch <code>${esc(pr.head.ref)}</code>` : ''} &middot; open ${esc(pr.age)}</span>
             <ul>${pr.articles.map(a => `<li>${esc(a.title)}</li>`).join('')}</ul>
             <span class="cover-pr"><a href="${esc(pr.html_url)}">${esc(pr.html_url)}</a></span>
           </li>`).join('')}
@@ -403,7 +515,7 @@ function buildHtml(prs, generatedOn) {
       ${totalArticles} article${totalArticles === 1 ? '' : 's'} across
       ${prs.length} pull request${prs.length === 1 ? '' : 's'}.
       Merging a pull request is what publishes its articles to jparkassociates.com.
-      Reviewer notes follow each draft on a cream ground &mdash; those are for you, not for print.
+      Reviewer notes follow each draft on a cream ground &mdash; those are working notes, not article copy.
     </p>
   </section>`;
 
@@ -419,7 +531,7 @@ function buildHtml(prs, generatedOn) {
       </header>
       <div class="draft-body">${a.bodyHtml}</div>
       ${a.notesMd
-        ? notesPanel('notes-article', 'Reviewer notes — not for publication', a.title, marked.parse(a.notesMd))
+        ? notesPanel('notes-article', 'Reviewer notes — not for publication', a.title, marked.parse(mdSafe(a.notesMd)))
         : notesPanel('notes-article notes-empty', 'Reviewer notes — not for publication', a.title,
             '<p>No per-article notes were found in the pull request body for this draft. ' +
             'Check the pull request directly before merging.</p>')}
@@ -428,7 +540,7 @@ function buildHtml(prs, generatedOn) {
   const general = prs.flatMap(pr =>
     pr.general.length
       ? [notesPanel('notes-run', 'Run notes — not for publication', `PR #${pr.number}`,
-          pr.general.map(s => `<h4>${esc(s.title)}</h4>${marked.parse(s.md)}`).join(''))]
+          pr.general.map(s => `<h4>${esc(s.title)}</h4>${marked.parse(mdSafe(s.md))}`).join(''))]
       : []).join('');
 
   return `<!DOCTYPE html>
@@ -442,7 +554,13 @@ function buildHtml(prs, generatedOn) {
 <style>
   :root {
     --navy-900:#1B2A4A; --navy-950:#111c33; --navy-700:#2E4A7A;
-    --gold-500:#C9A84C; --gold-300:#e0c87e;
+    /* Same three golds as email-chrome.mjs, and used the same way:
+       --gold-500 is a SURFACE (rules, borders) and never type;
+       --gold-300 is gold on navy — it is C.GOLD_PILL, so the packet and the
+       email render the same element in the same gold;
+       --gold-text is gold type on a light ground. #C9A84C as type on white is
+       2.29:1, which is why it never appears as one here. */
+    --gold-500:#C9A84C; --gold-300:#F0DCA8; --gold-text:#7E6015;
     --cream-50:#F5F0E8; --slate-600:#3A4660; --grey-500:#5C6577; --white:#fff;
     --serif:"Playfair Display",Georgia,serif;
     --sans:"Inter","Liberation Sans",Arial,sans-serif;
@@ -495,7 +613,7 @@ function buildHtml(prs, generatedOn) {
   .draft-body .sources-box .label {
     display:block; font-size:7.5pt; font-weight:600; letter-spacing:.24em; text-transform:uppercase; margin-bottom:2.5mm;
   }
-  .draft-body .callout .label { color:var(--gold-500); }
+  .draft-body .callout .label { color:var(--gold-text); }
   .draft-body .callout p:last-child { margin-bottom:0; }
 
   .draft-body .action-list { background:var(--navy-900); border-radius:3mm; padding:7mm; margin:6mm 0; break-inside:avoid; }
@@ -558,6 +676,9 @@ ${general}
 
 async function main() {
   const prs = JSON.parse(await fs.readFile(process.env.DRAFTS_JSON, 'utf8'));
+  // A non-array hits `.length === undefined` and exits 0, so a malformed
+  // handoff would be indistinguishable from a quiet week with nothing to review.
+  if (!Array.isArray(prs)) throw new Error('DRAFTS_JSON did not contain an array of pull requests.');
   if (!prs.length) {
     console.log('No draft PRs supplied — nothing to render.');
     return;
@@ -593,6 +714,7 @@ async function main() {
       const { byFile, order, general } = parseNotes(pr.body);
       const paths = await prArticleFiles(pr.number);
       const articles = [];
+      const skipped = [];
 
       for (const path of paths) {
         let extracted = null;
@@ -600,10 +722,12 @@ async function main() {
           extracted = await extractArticle(page, await fileAtRef(path, pr.head.sha));
         } catch (err) {
           console.log(`::warning::Could not render ${path} from PR #${pr.number}: ${err.message}`);
+          skipped.push(path);
           continue;
         }
         if (!extracted) {
           console.log(`::warning::${path} in PR #${pr.number} has no .article-body — skipped.`);
+          skipped.push(path);
           continue;
         }
         articles.push({ ...extracted, path, notesMd: byFile.get(path) || '' });
@@ -611,8 +735,11 @@ async function main() {
 
       if (!articles.length) {
         console.log(`::warning::PR #${pr.number} contributed no renderable articles.`);
-        // Keep its notes so the packet still carries something reviewable.
-        if (general.length) rendered.push({ ...pr, articles: [], general, age: ageLabel(pr.created_at) });
+        // Keep the PR in the packet even with nothing rendered: its notes are
+        // still reviewable, and the reviewer has to be told the drafts exist.
+        const orphanNotes = [...byFile.entries()].map(([path, md]) => ({ title: path, md }));
+        rendered.push({ ...pr, articles: [], skipped, general: [...general, ...orphanNotes],
+                        age: ageLabel(pr.created_at) });
         continue;
       }
 
@@ -620,11 +747,17 @@ async function main() {
       const rank = p => (order.has(p) ? order.get(p) : Number.MAX_SAFE_INTEGER);
       articles.sort((a, b) => rank(a.path) - rank(b.path) || a.path.localeCompare(b.path));
 
-      // Notes that never bound to a file still belong in the packet.
-      const unbound = [...byFile.entries()].filter(([p]) => !paths.includes(p));
-      for (const [p, md] of unbound) general.push({ title: p, md });
+      // Diff against what actually RENDERED, not against every path the PR
+      // touched. Diffing against `paths` meant that when an article failed to
+      // render, its reviewer notes matched a path in the list, fell out of the
+      // unbound set, and disappeared from the packet and the email both — the
+      // notes for the one draft nobody could read were the notes that got lost.
+      const shown = new Set(articles.map(a => a.path));
+      for (const [path, md] of byFile.entries()) {
+        if (!shown.has(path)) general.push({ title: path, md });
+      }
 
-      rendered.push({ ...pr, articles, general, age: ageLabel(pr.created_at) });
+      rendered.push({ ...pr, articles, skipped, general, age: ageLabel(pr.created_at) });
       console.log(`PR #${pr.number}: ${articles.length} article(s) rendered.`);
     }
 
@@ -642,7 +775,8 @@ async function main() {
       document.fonts.ready,
       new Promise(resolve => setTimeout(resolve, 5000)),
     ])).catch(() => {});
-    const foot = 'font-family:Inter,Arial,sans-serif;font-size:7.5pt;color:#8A93A6;width:100%;padding:0 14mm;';
+    // C.GREY. The old #8A93A6 measured 3.09:1 on white, on every page.
+  const foot = 'font-family:Inter,Arial,sans-serif;font-size:7.5pt;color:#5C6577;width:100%;padding:0 14mm;';
     await page.pdf({
       path: OUT,
       format: 'Letter',

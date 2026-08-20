@@ -61,7 +61,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Digits only. A pasted "#42" would 404 the API and, separately, produce a
+      # concurrency group that does not match the automatic path's.
+      - name: Read the pull request number
+        id: pr
+        run: |
+          n=$(printf '%s' "${{ github.event.inputs.pr_number || github.event.pull_request.number }}" | tr -cd '0-9')
+          [ -n "$n" ] || { echo "::error::pr_number must be a number."; exit 1; }
+          echo "number=$n" >> "$GITHUB_OUTPUT"
+
+      # A "Re-run all jobs" on a SUCCESSFUL run used to re-send a byte-identical
+      # notice. Keyed on the merge commit, so a genuine re-merge is a new event.
+      # workflow_dispatch deliberately skips the check — a manual re-send is the
+      # documented way to send this notice again.
+      - name: Has this merge already been announced?
+        id: lock
+        if: github.event_name != 'workflow_dispatch'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/announced
+          key: ledger-published-${{ steps.pr.outputs.number }}-${{ github.event.pull_request.merge_commit_sha }}
+          lookup-only: true
+
       - name: Check out the site after the merge
+        if: steps.lock.outputs.cache-hit != 'true'
         uses: actions/checkout@v6
         with:
           # The base branch as it now stands — the merge is already in it, so
@@ -69,15 +93,17 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
 
       - name: Set up Node
+        if: steps.lock.outputs.cache-hit != 'true'
         uses: actions/setup-node@v5
         with:
           node-version: '24'
 
       - name: Build the publish notice
         id: build
+        if: steps.lock.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
           EMAIL_HTML_OUT: ${{ runner.temp }}/published.html
           EMAIL_TEXT_OUT: ${{ runner.temp }}/published.txt
           SUBJECT_OUT: ${{ runner.temp }}/subject.txt
@@ -107,3 +133,16 @@ jobs:
           subject: ${{ steps.build.outputs.subject }}
           html_file: ${{ runner.temp }}/published.html
           body: ${{ steps.build.outputs.text }}
+
+      - name: Remember that this merge was announced
+        if: github.event_name != 'workflow_dispatch' && steps.build.outputs.send == 'yes'
+        continue-on-error: true
+        run: mkdir -p '${{ runner.temp }}/announced' && date -u > '${{ runner.temp }}/announced/at'
+
+      - name: Keep that record
+        if: github.event_name != 'workflow_dispatch' && steps.build.outputs.send == 'yes'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/announced
+          key: ledger-published-${{ steps.pr.outputs.number }}-${{ github.event.pull_request.merge_commit_sha }}

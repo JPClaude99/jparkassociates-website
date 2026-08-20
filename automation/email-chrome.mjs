@@ -194,22 +194,54 @@ export function emailShell(o) {
 const BODY_FONT = "400 15px/1.7 Arial,Helvetica,sans-serif";
 const SERIF     = "Georgia,'Times New Roman',serif";
 
-/** Gmail clips a message body past ~102 KB behind a "View entire message" link. */
+/* Gmail clips a message past ~102 KB behind a "View entire message" link, and
+   it measures the message ON THE WIRE — quoted-printable encoding, headers,
+   MIME boundaries and the text/plain alternative all included. Measuring the
+   decoded HTML against 102 KB therefore passes messages that Gmail then clips:
+   a body that decodes to 103 KB composed to 112 KB on the wire, ~8 KB over.
+   QP inflation on this content measures ~7%; 1.15 leaves room for the headers
+   and the plain-text part on top of that. */
 export const GMAIL_CLIP_BYTES = 102 * 1024;
+const WIRE_OVERHEAD = 1.15;
+export const htmlBudget = () => Math.floor(GMAIL_CLIP_BYTES / WIRE_OVERHEAD);
 
-const listHtml = (items, ordered) => `
-      <${ordered ? 'ol' : 'ul'} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
-        ${items.map(i => `<li style="margin:0 0 7px;">${i}</li>`).join('')}
-      </${ordered ? 'ol' : 'ul'}>`;
+/* Items arrive flattened, each carrying its nesting depth. Nested <ul> inside
+   <li> is the markup mail clients disagree about most, so depth becomes an
+   indent on a flat list — same reading order, no client-specific collapse. */
+const listHtml = (items, ordered) => {
+  const norm = items.map(i => (typeof i === 'string' ? { html: i, depth: 0 } : i));
+  const tag = ordered ? 'ol' : 'ul';
+  return `
+      <${tag} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
+        ${norm.map(i => `<li style="margin:0 0 7px;${i.depth ? `margin-left:${i.depth * 18}px;list-style-type:circle;` : ''}">${i.html}</li>`).join('')}
+      </${tag}>`;
+};
+
+/** A real table, because a rate table flattened into a paragraph is unreadable
+    — "1120-SSep 15Sep 15" is not a deadline anyone can act on. */
+const tableHtml = rows => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;border-collapse:collapse;">
+      ${rows.map(r => `<tr>${r.cells.map(c => `
+        <${r.header ? 'th' : 'td'} class="${r.header ? 't-strong' : 't-body'}" align="left" valign="top"
+            ${r.header ? `bgcolor="${C.CREAM}"` : ''} style="${r.header ? `background-color:${C.CREAM};font:700 13px/1.5 Arial,Helvetica,sans-serif;color:${C.NAVY_900};` : `font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${C.SLATE};`}border:1px solid #e8e2d6;padding:8px 10px;">${c}</${r.header ? 'th' : 'td'}>`).join('')}</tr>`).join('')}
+    </table>`;
+
+const preHtml = text => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;"><tr>
+      <td class="e-callout" bgcolor="${C.CREAM}" style="background-color:${C.CREAM};border-radius:8px;padding:14px 16px;">
+        <pre style="margin:0;font:400 12px/1.55 Consolas,Menlo,monospace;color:${C.SLATE};white-space:pre-wrap;word-break:break-word;">${esc(text)}</pre>
+      </td>
+    </tr></table>`;
 
 /** The navy "do this before <date>" block. Checkmarks are cells, not bullets:
     list-style images are stripped by Outlook and ::before never renders. */
-const actionHtml = (heading, items) => `
+const actionHtml = (heading, items, lead = []) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
       <td class="e-cta" bgcolor="${C.NAVY_900}" style="background-color:${C.NAVY_900};border-radius:10px;padding:20px 24px;">
         ${heading ? `<p style="margin:0 0 12px;font:700 15px/1.35 ${SERIF};color:${C.GOLD_PILL};">${esc(heading)}</p>` : ''}
+        ${lead.map(l => `<p style="margin:0 0 12px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};">${l}</p>`).join('')}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-          ${items.map(i => `
+          ${flat(items).map(i => `
           <tr>
             <td width="20" valign="top" style="font:700 14px/1.6 ${SERIF};color:${C.GOLD_PILL};">&#10003;</td>
             <td style="font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};padding-bottom:7px;">${i}</td>
@@ -218,12 +250,14 @@ const actionHtml = (heading, items) => `
       </td>
     </tr></table>`;
 
+const flat = items => items.map(i => (typeof i === 'string' ? i : i.html));
+
 const sourcesHtml = (label, items) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
       <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
         <p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label || 'Sources')}</p>
         <ul class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
-          ${items.map(i => `<li style="margin:0 0 5px;">${i}</li>`).join('')}
+          ${flat(items).map(i => `<li style="margin:0 0 5px;">${i}</li>`).join('')}
         </ul>
       </td>
     </tr></table>`;
@@ -240,10 +274,14 @@ export function articleBlocksHtml(blocks) {
         return `<h3 class="t-title" style="margin:22px 0 8px;font:700 16px/1.35 ${SERIF};color:${C.NAVY_900};">${esc(b.text)}</h3>`;
       case 'list':
         return listHtml(b.items, b.ordered);
+      case 'table':
+        return tableHtml(b.rows);
+      case 'pre':
+        return preHtml(b.text);
       case 'callout':
         return `<div style="margin:0 0 18px;">${callout(b.label || '', articleBlocksHtml(b.blocks))}</div>`;
       case 'action':
-        return actionHtml(b.heading, b.items);
+        return actionHtml(b.heading, b.items, b.lead);
       case 'sources':
         return sourcesHtml(b.label, b.items);
       case 'disclaimer':

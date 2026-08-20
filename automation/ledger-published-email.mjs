@@ -40,6 +40,33 @@ const gh = async p => {
   return r.json();
 };
 
+/** Every page, not just the first. A PR over 100 files would otherwise look
+    like it published nothing at all, send nothing, and pass. */
+async function ghPaged(pathname) {
+  const all = [];
+  for (let page = 1; page <= 20; page++) {
+    const batch = await gh(`${pathname}?per_page=100&page=${page}`);
+    all.push(...batch);
+    if (batch.length < 100) return all;
+  }
+  console.log('::warning::Stopped paginating the PR file list at 2000 files.');
+  return all;
+}
+
+/** Is this file one of ours — an article rendered from blog/_template.html?
+    The template's body is `<main class="article-body">`, and nothing else under
+    blog/ carries that class. Without the check, a hub or landing page added
+    under blog/ looks like an orphaned article and fails the run for nothing. */
+async function isArticle(slug) {
+  try {
+    const html = await fs.readFile(path.join(DIR, 'blog', `${slug}.html`), 'utf8');
+    return /class="[^"]*\barticle-body\b/.test(html);
+  } catch {
+    console.log(`::warning::blog/${slug}.html is not in the checkout; not treating it as an article.`);
+    return false;
+  }
+}
+
 /** blog/posts.js is ours and assigns window.BLOG_POSTS; run it against a stub. */
 async function manifest() {
   const src = await fs.readFile(path.join(DIR, 'blog/posts.js'), 'utf8');
@@ -57,14 +84,20 @@ const LABELS = {
 async function main() {
   const prNumber = process.env.PR_NUMBER;
   const pr = await gh(`/repos/${REPO}/pulls/${prNumber}`);
-  const files = await gh(`/repos/${REPO}/pulls/${prNumber}/files?per_page=100`);
+  const files = await ghPaged(`/repos/${REPO}/pulls/${prNumber}/files`);
 
-  const slugs = files
-    .filter(f => f.status !== 'removed')
+  // NEWLY published only. 'modified' is a correction to an article that went
+  // live weeks ago; announcing "it's live" again is a duplicate notice about
+  // old news. A rename gives the article a new URL, so that one does count.
+  const candidates = files
+    .filter(f => f.status === 'added' || f.status === 'renamed')
     .map(f => /^blog\/([^/]+)\.html$/.exec(f.filename))
     .filter(Boolean)
     .map(m => m[1])
     .filter(slug => slug !== '_template');
+
+  const slugs = [];
+  for (const slug of candidates) if (await isArticle(slug)) slugs.push(slug);
 
   // Walk the manifest, not the API's file list: posts.js is in publication
   // order and the blog index renders it that way, so the email agrees with the
@@ -73,22 +106,29 @@ async function main() {
   const posts = await manifest();
   const published = posts.filter(p => wanted.has(p.slug));
 
-  if (!published.length) {
-    // Two very different situations, and conflating them hid a real defect.
-    if (!slugs.length) {
-      // Clean no-op: a Ledger PR may legitimately touch only automation.
-      console.log(`PR #${prNumber} added no article files — nothing published, no email.`);
-      return;
-    }
-    // An article file shipped to the site but is not in blog/posts.js, so it is
-    // live and unreachable — absent from the blog index and from this email.
-    // Failing is the alarm: GitHub mails the repo admin about a failed run,
-    // which is the only way anyone finds out.
+  // Clean no-op: a Ledger PR may legitimately touch only automation, or only
+  // correct an article that is already live.
+  if (!slugs.length) {
+    console.log(`PR #${prNumber} added no new article files — nothing published, no email.`);
+    return;
+  }
+
+  // EVERY added article must be in the manifest, not merely one of them.
+  // Gating on `!published.length` missed the case that actually happens: the
+  // scan drafts two articles and prepends only one posts.js entry, so the
+  // second is live, absent from the index, absent from this email — green run.
+  const listed = new Set(published.map(p => p.slug));
+  const orphans = slugs.filter(slug => !listed.has(slug));
+  if (orphans.length) {
+    const it = orphans.length === 1 ? 'it' : 'them';
+    // Failing IS the alarm. GitHub mails the repo admin about a failed run,
+    // which is the only way anyone finds out an article shipped unreachable.
     throw new Error(
-      `PR #${prNumber} added ${slugs.map(s => `blog/${s}.html`).join(', ')} but ` +
-      'none of those slugs are in blog/posts.js. The article(s) are live on the site and ' +
-      'missing from the blog index. Add the manifest entry, then re-send this notice with ' +
-      'the "Ledger published" workflow_dispatch.');
+      `PR #${prNumber} added ${orphans.map(s => `blog/${s}.html`).join(', ')}, ` +
+      `${orphans.length === 1 ? 'which is' : 'which are'} live on the site but missing from ` +
+      `blog/posts.js — nothing links to ${it}, and the blog index does not list ${it}. ` +
+      'Add the manifest entries, then re-send this notice with the "Ledger published" ' +
+      'workflow_dispatch.');
   }
 
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;

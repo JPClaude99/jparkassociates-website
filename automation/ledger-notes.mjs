@@ -36,12 +36,20 @@ export function parseNotes(body) {
   const sections = body.split(/\n(?=##\s)/g);
   for (const section of sections) {
     const headingMatch = section.match(/^##\s+(.+?)\s*$/m);
-    const heading = headingMatch ? headingMatch[1].trim() : '';
+    // Closing hashes are optional in ATX, so "## 1. Title ##" must not title
+    // the article "Title ##".
+    const heading = headingMatch ? headingMatch[1].replace(/\s*#+\s*$/, '').trim() : '';
     const rest    = headingMatch ? section.slice(headingMatch[0].length) : section;
 
     // A per-article section names its file in backticks near the top.
     const pathMatch = rest.match(/`(blog\/[A-Za-z0-9._-]+\.html)`/);
-    if (pathMatch && /^\d+\./.test(heading)) {
+    // FIRST binding wins. A typo that points two sections at the same file used
+    // to overwrite silently: the first article's notes vanished from every
+    // artifact and the second article's notes were printed under the first
+    // article's name. Losing notes is the one thing this parser must not do, so
+    // a repeat path keeps the original binding and the later section is carried
+    // into the run notes, where a reviewer will still see it.
+    if (pathMatch && /^\d+\./.test(heading) && !byFile.has(pathMatch[1])) {
       byFile.set(pathMatch[1], rest.trim());
       order.set(pathMatch[1], order.size);
       // "## 1. Title" -> "Title". The scan agent writes the article's own
@@ -57,9 +65,13 @@ export function parseNotes(body) {
   return { byFile, order, titles, general };
 }
 
-/** "3h" / "5d" — how long a draft has been sitting. */
+/** "3h" / "5d" — how long a draft has been sitting. An unparseable or missing
+    timestamp prints "just opened" rather than "NaNh"; a clock-skewed future
+    date clamps to zero rather than printing a negative age. */
 export const ageLabel = (iso) => {
-  const hours = Math.round((Date.now() - Date.parse(iso)) / 36e5);
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return 'just opened';
+  const hours = Math.max(0, Math.round((Date.now() - then) / 36e5));
   return hours >= 48 ? `${Math.round(hours / 24)}d` : `${hours}h`;
 };
 
