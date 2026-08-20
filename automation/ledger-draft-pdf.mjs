@@ -539,7 +539,16 @@ async function main() {
 
     const html = buildHtml(rendered, generatedOn);
     if (process.env.HTML_OUT) await fs.writeFile(process.env.HTML_OUT, html);
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    // 'load', not 'networkidle0'. The webfont request to fonts.googleapis.com
+    // keeps the connection pool busy long enough on a GitHub runner that
+    // networkidle0 times out and takes the whole packet with it. Wait for the
+    // document, then give the fonts a bounded moment to settle — a packet in
+    // fallback faces beats no packet at all.
+    await page.setContent(html, { waitUntil: 'load', timeout: 60_000 });
+    await page.evaluate(() => Promise.race([
+      document.fonts.ready,
+      new Promise(resolve => setTimeout(resolve, 5000)),
+    ])).catch(() => {});
     const foot = 'font-family:Inter,Arial,sans-serif;font-size:7.5pt;color:#8A93A6;width:100%;padding:0 14mm;';
     await page.pdf({
       path: OUT,
