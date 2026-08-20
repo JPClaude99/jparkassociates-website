@@ -503,6 +503,7 @@ async function extractArticle(page, html) {
     const alphaOf = n => { let o = ''; while (n > 0) { const r = (n - 1) % 26; o = String.fromCharCode(97 + r) + o; n = (n - r - 1) / 26; } return o; };
     const listMark = (n, type) => {
       if (!Number.isFinite(n) || n < 1) return String(n);
+      if ((type === 'i' || type === 'I') && n > 3999) return String(n);
       switch (type) {
         case 'a': return alphaOf(n);
         case 'A': return alphaOf(n).toUpperCase();
@@ -549,6 +550,16 @@ async function extractArticle(page, html) {
         return { ...b, items: b.items.map(i => (i && typeof i.html === 'string' && i.html
           ? { ...i, html: wrap(i.html) } : i)) };
       }
+      /* A table and a callout carry their markup deeper still, and falling
+         through left them unwrapped: a <del> around a rate table struck every
+         cell in the PDF and none in the email, so a superseded table read as
+         current. */
+      if (Array.isArray(b.rows)) {
+        return { ...b, rows: b.rows.map(r => ({ ...r, cells: (r.cells || []).map(c => (
+          typeof c === 'string' ? wrap(c)
+            : c && typeof c.html === 'string' && c.html ? { ...c, html: wrap(c.html) } : c)) })) };
+      }
+      if (Array.isArray(b.blocks)) return { ...b, blocks: b.blocks.map(x => wrapBlock(x, wrap)) };
       return b;
     };
 
@@ -611,11 +622,12 @@ async function extractArticle(page, html) {
         header: [...tr.children].every(c => c.tagName !== 'TD'),
         cells: cellsOf(tr),
       })).filter(r => r.cells.length);
+      const tableDir = dirOf(el);
       const capEl = el.querySelector(':scope > caption');
       const cap = text(capEl);
       const out = [];
       if (cap) out.push(headBlock('h3', capEl, false));
-      if (rows.length) { out.push({ kind: 'table', rows }); return out; }
+      if (rows.length) { out.push({ kind: 'table', rows, dir: tableDir }); return out; }
       // No rows is not no content — but the caption is already out, so the
       // fallback must not print it a second time.
       const rest = capEl ? withoutNodes(el, [capEl]) : el;
@@ -688,6 +700,12 @@ async function extractArticle(page, html) {
          numbered in the packet either. `reversed` is left alone; splitting a
          countdown is not something an article has ever done, and guessing its
          base wrong is worse than leaving the attribute to the client. */
+      /* A REVERSED list is numbered here, item by item, rather than left to the
+         client. Splitting one across a table made each chunk count down from
+         its own length, so a three-step countdown printed 2. 1. … 1. — two
+         steps both called one. The base is the attribute, or the item count. */
+      const liCount = [...list.children].filter(c => c.tagName === 'LI').length;
+      let nextNum = startAttr ?? (reversed ? (liCount || 1) : 1);
       let emitted = 0;
       const flush = () => {
         if (run.length) {
@@ -716,7 +734,17 @@ async function extractArticle(page, html) {
         const emitOwned = (node) => {
           if (node.tagName === 'UL' || node.tagName === 'OL') {
             for (const b of listBlocks(node, onNavy, depth + 1)) {
-              if (b.kind === 'list') run.push(...b.items);
+              if (b.kind === 'list') {
+                // Each nested item remembers ITS OWN list's numbering, so a
+                // panel can mark it the way the packet draws it instead of
+                // falling back to a checkmark.
+                for (const i of b.items) {
+                  if (i.depth && i.ordered === undefined) {
+                    i.ordered = b.ordered; i.start = b.start; i.type = b.type;
+                  }
+                }
+                run.push(...b.items);
+              }
               else { flush(); out.push(b); }
             }
           } else {
@@ -727,8 +755,16 @@ async function extractArticle(page, html) {
 
         // An <li> whose only content is a table used to emit a blank bullet.
         if (!owned.length) {
-          const html = withDir(li, flatten(li, onNavy).trim());
-          if (html) run.push({ html, depth });
+          /* An <li> that flattens to nothing is still an ITEM. Dropping it made
+             the email renumber, so "step three" was step 3 in the PDF and step
+             2 in the email. The packet draws a blank bullet; so does this. */
+          const html = withDir(li, flatten(li, onNavy).trim()) || '&#160;';
+          // Numbered here too: this fast path is where a simple item goes, and
+          // leaving it out gave the first step of every list no number at all
+          // while the rest carried theirs.
+          const it = { html, depth };
+          if (ordered && !depth) { it.value = nextNum; nextNum += reversed ? -1 : 1; }
+          run.push(it);
           continue;
         }
 
@@ -747,7 +783,16 @@ async function extractArticle(page, html) {
         let started = false;
         const pushItem = (html) => {
           if (!html) return;
-          run.push(started ? { html, depth, cont: true } : { html, depth });
+          if (started) { run.push({ html, depth, cont: true }); return; }
+          /* EVERY top-level item of an ordered list states its own number, and
+             the email prints that number rather than counting. Letting the
+             client count meant a list split across a table restarted — twice a
+             "step 1" — and a reversed one counted down from each chunk's own
+             length. The packet's numbering is the browser's; this is the same
+             arithmetic, done once. */
+          const it = { html, depth };
+          if (ordered && !depth) { it.value = nextNum; nextNum += reversed ? -1 : 1; }
+          run.push(it);
           started = true;
         };
         let buf = [];
@@ -929,9 +974,32 @@ async function extractArticle(page, html) {
                   panelHasOrdered = true;
                   // A reversed list with no start counts DOWN from its own
                   // length, which is what the browser draws in the packet.
+                  /* `i.value` first: the item already knows its number, and a
+                     reversed list split across a table has no per-chunk start
+                     to count from — each chunk counted down from its own length
+                     and printed two steps both called one. */
                   let n = Number.isFinite(b.start) ? b.start
                         : b.reversed ? (tops.length || 1) : 1;
-                  for (const i of tops) { i.marker = `${listMark(n, b.type)}.`; n += b.reversed ? -1 : 1; }
+                  for (const i of tops) {
+                    const at = Number.isFinite(i.value) ? i.value : n;
+                    i.marker = `${listMark(at, b.type)}.`;
+                    n = at + (b.reversed ? -1 : 1);
+                  }
+                  /* NESTED ordered items need markers too. Without one the
+                     renderer fell back to a checkmark, so a sub-list the packet
+                     numbered 1. 2. arrived as two ticks. The packet suppresses
+                     its own checkmark for any ol, so it is unambiguously
+                     numbered there. */
+                  const deep = b.items.filter(i => i.depth && !i.cont);
+                  const counters = new Map();
+                  for (const i of deep) {
+                    if (!i.ordered) { i.marker = CHECK; continue; }
+                    const at = counters.get(i.depth);
+                    const from = at === undefined
+                      ? (Number.isFinite(i.start) ? i.start : 1) : at;
+                    i.marker = `${listMark(from, i.type || '')}.`;
+                    counters.set(i.depth, from + 1);
+                  }
                 }
                 if (navSeq.some(b => b.kind === 'list' && !b.ordered)) panelHasUnordered = true;
                 // An EMPTY <ul> is not the checklist. Letting it advance the
@@ -1506,6 +1574,11 @@ function buildHtml(prs, generatedOn) {
   .draft-body pre { white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
   .draft-body { overflow-wrap:break-word; }
   .draft-body td, .draft-body th, .draft-body code { overflow-wrap:anywhere; }
+  /* Top-aligned, like the email's cells. A cell spanning two rows is
+     vertically centred by default, so its text sat below the row it starts
+     in and a reader comparing the two artifacts met the columns of a rate
+     table in a different order. */
+  .draft-body td, .draft-body th { vertical-align:top; }
   /* A highlight is a gold ground; everything on it is navy, whatever colour the
      rule for its own element would otherwise give it. Without this the panel's
      catch-all painted cream straight over the highlight at 1.06:1. */
@@ -1619,6 +1692,18 @@ function buildHtml(prs, generatedOn) {
   .draft-body .callout .action-list *,
   .draft-body .sources-box .action-list,
   .draft-body .sources-box .action-list * { color:rgba(245,240,232,.9); }
+  /* strong / a / dt by name as well as by the catch-all: the box's own rules
+     for those are one class MORE specific than a bare descendant selector, so
+     a bold word inside the nested panel measured 1.00:1 — navy on navy, simply
+     gone from the page — and a link 1.61:1, while the email drew both. */
+  .draft-body .callout .action-list strong,
+  .draft-body .callout .action-list b,
+  .draft-body .callout .action-list dt,
+  .draft-body .sources-box .action-list strong,
+  .draft-body .sources-box .action-list b,
+  .draft-body .sources-box .action-list dt { color:var(--cream-50); }
+  .draft-body .callout .action-list a,
+  .draft-body .sources-box .action-list a { color:var(--gold-300); }
   .draft-body .callout .action-list h1, .draft-body .callout .action-list h2,
   .draft-body .callout .action-list h3, .draft-body .callout .action-list h4,
   .draft-body .sources-box .action-list h1, .draft-body .sources-box .action-list h2,
@@ -1644,7 +1729,11 @@ function buildHtml(prs, generatedOn) {
   .draft-body .sources-box mark,
   .draft-body .sources-box mark *,
   .draft-body .callout mark,
-  .draft-body .callout mark * { background:var(--gold-300); color:var(--navy-900); }
+  .draft-body .callout mark *,
+  .draft-body mark .label,
+  .draft-body .callout mark .label,
+  .draft-body .action-list mark .label,
+  .draft-body .sources-box mark .label { background:var(--gold-300); color:var(--navy-900); }
 
   /* ---------- reviewer notes: same language, unmistakably not the article ---------- */
   .notes {
@@ -1681,6 +1770,12 @@ function buildHtml(prs, generatedOn) {
      roughly 25 characters of it were never printed. */
   .notes pre, .notes code { white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
   .notes { overflow-wrap:break-word; }
+  /* A cell sets its own min-content width, so overflow-wrap on the container
+     does not reach it: one long IRS URL in a markdown table pushed the table
+     141px past the page edge and roughly 25 characters per row were never
+     printed. table-layout:fixed makes the columns share the width. */
+  .notes table { table-layout:fixed; width:100%; }
+  .notes td, .notes th, .notes a { word-break:break-word; overflow-wrap:anywhere; }
   .notes-empty { color:var(--grey-500); font-style:italic; }
   .notes-run { break-before:page; border-left-color:var(--gold-500); border-top-color:var(--gold-500); }
   .notes-run .notes-label { color:var(--navy-900); }

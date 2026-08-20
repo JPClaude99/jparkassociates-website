@@ -245,16 +245,22 @@ const listHtml = (items, ordered, start, type, reversed) => {
   // honours, and the two artifacts have to agree on what a step is called.
   // start / type / reversed all carried: the packet honours them, and the two
   // artifacts have to agree on what a step is called.
-  const from = ordered && Number.isFinite(start) && start !== 1 ? ` start="${Number(start)}"` : '';
+  /* NO `start` and NO `reversed` on the element. Every top-level item carries
+     its own `value` from the extractor, which is the only way a list split
+     across a table stays in one sequence; leaving the count to the client gave
+     two steps the same number in one artifact and not the other. `type` stays,
+     because it is how the marker is DRAWN, not what it counts. */
+  const from = '';
   const kind = ordered && /^[1aAiI]$/.test(String(type || '')) ? ` type="${type}"` : '';
-  const rev = ordered && reversed ? ' reversed' : '';
+  const rev = '';
   /* Sub-items are <li> here and nested <li> in the packet, so an <ol> holding
      one counted it and the packet did not: "1. file 2.(sub) 3. pay" against
      "1. file / sub / 2. pay". Every top-level step therefore states its own
      number. Not for `reversed` — its base is the item count, which a list
      split across blocks no longer knows; there the client's own count is
      closer than a guess. */
-  let n = ordered && !reversed ? (Number.isFinite(start) ? Number(start) : 1) : null;
+  // Fallback only: items from a path that did not number them.
+  let n = ordered ? (Number.isFinite(start) ? Number(start) : 1) : null;
   /* `cont` is the REST of an item that a table or a figure interrupted. It is
      the same step, so it gets no marker and consumes no number — otherwise the
      PDF's "2." was the email's "3." from the first interrupted step onward. */
@@ -262,7 +268,13 @@ const listHtml = (items, ordered, start, type, reversed) => {
                              : i.depth ? `margin-left:${i.depth * 18}px;list-style-type:circle;` : '');
   return `
       <${tag}${from}${kind}${rev} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
-        ${norm.map(i => `<li${n !== null && !i.depth && !i.cont ? ` value="${n++}"` : ''} style="margin:0 0 7px;${marker(i)}">${i.html}</li>`).join('')}
+        ${norm.map(i => {
+          // An explicit value wins: a reversed list numbers its items in the
+          // extractor, because splitting one across a table let the client
+          // restart the countdown and print two steps both called one.
+          const v = Number.isFinite(i.value) ? i.value : (n !== null && !i.depth && !i.cont ? n++ : null);
+          return `<li${v !== null && !i.cont ? ` value="${v}"` : ''} style="margin:0 0 7px;${marker(i)}">${i.html}</li>`;
+        }).join('')}
       </${tag}>`;
 };
 
@@ -271,8 +283,8 @@ const listHtml = (items, ordered, start, type, reversed) => {
     Cells arrive as {html, colspan, rowspan}: a merged header cell that loses
     its span shifts every value in the row one column left, which is how a
     California date ends up printed under "Form". */
-const tableHtml = rows => `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;border-collapse:collapse;">
+const tableHtml = (rows, dir = '') => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"${dir ? ` dir="${dir}"` : ''} style="margin:0 0 18px;border-collapse:collapse;">
       ${rows.map(r => `<tr>${r.cells.map(cell => {
         const c = typeof cell === 'string' ? { html: cell, colspan: 1, rowspan: 1 } : cell;
         // Three kinds of cell, not two: a column heading (cream, bold), a row
@@ -314,6 +326,9 @@ const roman = n => { let o = ''; for (const [v, t] of ROMAN) while (n >= v) { o 
 const alpha = n => { let o = ''; while (n > 0) { const r = (n - 1) % 26; o = String.fromCharCode(97 + r) + o; n = (n - r - 1) / 26; } return o; };
 const listMarker = (n, type) => {
   if (!Number.isFinite(n) || n < 1) return String(n);
+  // Chrome falls back to decimal outside the range roman numerals can express,
+  // so the packet printed 4000. where this printed MMMM.
+  if ((type === 'i' || type === 'I') && n > 3999) return String(n);
   switch (type) {
     case 'a': return alpha(n);
     case 'A': return alpha(n).toUpperCase();
@@ -359,7 +374,31 @@ const indent = i => (typeof i === 'string' ? i : (i.depth
   ? `<span style="padding-left:${i.depth * 16}px;display:inline-block;">&#8250; ${i.html}</span>`
   : i.html));
 
-const sourcesHtml = (label, items, ordered = false, start = 1, reversed = false, type = '') => `
+/* PER-ITEM MARKERS, when the extractor supplied them. A real <ol start> could
+   only carry a decimal starting point, so a sources box lost `type` and
+   `reversed` outright, a list split by a heavy block restarted at 1 twice, and
+   a box mixing an <ol> with a <ul> came out with no numbers at all. The panel
+   draws its own marker column for exactly this reason; the citation list now
+   does too, and falls back to a real list when there are no markers. */
+const sourcesHtml = (label, items, ordered = false, start = 1, reversed = false, type = '') => {
+  const marked = (items || []).some(i => i && i.marker !== undefined);
+  if (marked) return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
+      <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
+        ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+          ${items.map(i => `
+          <tr>
+            <td class="t-muted" width="22" valign="top" style="font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};padding-left:${(i && i.depth ? i.depth * 18 : 0)}px;">${
+              i && i.cont ? '' : i && i.marker !== undefined && i.marker !== '\u2713'
+                ? esc(i.marker)
+                : ''}</td>
+            <td class="t-muted" style="font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;padding-bottom:5px;">${i.html}</td>
+          </tr>`).join('')}
+        </table>
+      </td>
+    </tr></table>`;
+  return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
       <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
         ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
@@ -368,6 +407,7 @@ const sourcesHtml = (label, items, ordered = false, start = 1, reversed = false,
         </${ordered ? 'ol' : 'ul'}>
       </td>
     </tr></table>`;
+};
 
 /** Render one block list. Unknown kinds are dropped rather than guessed at. */
 export function articleBlocksHtml(blocks) {
@@ -384,7 +424,7 @@ export function articleBlocksHtml(blocks) {
       case 'list':
         return listHtml(b.items, b.ordered, b.start, b.type, b.reversed);
       case 'table':
-        return tableHtml(b.rows);
+        return tableHtml(b.rows, b.dir);
       case 'pre':
         return preHtml(b.text, b.html);
       case 'callout':
