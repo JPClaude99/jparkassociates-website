@@ -120,13 +120,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRAFTS_JSON: ${{ runner.temp }}/drafts.json
           OUT_PATH: ${{ runner.temp }}/ledger-drafts.pdf
+          EMAIL_HTML_OUT: ${{ runner.temp }}/email.html
         run: |
           npm install --no-save --no-audit --no-fund puppeteer@25 marked@18
           node automation/ledger-draft-pdf.mjs
 
-      - name: Note a failed PDF build
-        if: steps.find.outputs.count != '0' && steps.pdf.outcome == 'failure'
-        run: echo "::warning::Draft review PDF could not be built; sending the alert without it."
+      # Decide from what is actually on disk, not from the build's exit code —
+      # the builder writes the branded email body before the work that can fail.
+      - name: Decide what the email can carry
+        id: mail
+        if: steps.find.outputs.count != '0'
+        run: |
+          html='${{ runner.temp }}/email.html'
+          pdf='${{ runner.temp }}/ledger-drafts.pdf'
+          if [ -s "$html" ]; then echo "html=file://$html" >> "$GITHUB_OUTPUT"; else echo "html=" >> "$GITHUB_OUTPUT"; fi
+          if [ -s "$pdf" ];  then echo "pdf=$pdf"          >> "$GITHUB_OUTPUT"; else echo "pdf=" >> "$GITHUB_OUTPUT"; fi
+          [ -s "$pdf" ]  || echo "::warning::No draft review PDF this run; sending the alert without it."
+          [ -s "$html" ] || echo "::warning::No branded HTML body this run; falling back to plain text."
 
       - name: Email the alert
         if: steps.find.outputs.count != '0'
@@ -140,14 +150,16 @@ jobs:
           from: Ledger Bot <${{ secrets.LEDGER_ALERT_SMTP_USER }}>
           to: jasonpark@jparkassociates.com
           subject: ${{ steps.find.outputs.subject }}
-          attachments: ${{ steps.pdf.outcome == 'success' && format('{0}/ledger-drafts.pdf', runner.temp) || '' }}
+          attachments: ${{ steps.mail.outputs.pdf }}
+          html_body: ${{ steps.mail.outputs.html }}
+          # Plain-text alternative, always sent alongside the HTML part.
           body: |
             A Ledger article is drafted but not yet live on jparkassociates.com.
             Merging its pull request is what publishes it.
 
             ${{ steps.find.outputs.body }}
 
-            ${{ steps.pdf.outcome == 'success'
+            ${{ steps.mail.outputs.pdf != ''
                 && 'Attached: ledger-drafts.pdf — each draft as it will read on the site, with reviewer notes after it.'
                 || 'The PDF review packet could not be built this run; see the Actions log. Review the pull request directly.' }}
 
