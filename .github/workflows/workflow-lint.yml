@@ -1,0 +1,40 @@
+name: Workflow lint
+
+# A YAML file parses perfectly happily with an unterminated quote inside a
+# `run:` block. The shell only finds out when the step executes — and in the
+# Ledger workflows a step that dies takes every step after it with it, because a
+# plain `if:` implies `success()`. That is how one stray quote turned the weekly
+# review email into a green run that silently sent nothing.
+#
+# `automation/lint-workflows.py` runs `bash -n` over every shell `run:` block.
+# It lives here so it actually runs, rather than depending on someone
+# remembering to.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+      - 'automation/lint-workflows.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+      - 'automation/lint-workflows.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check every shell step with bash -n
+        run: python3 automation/lint-workflows.py

@@ -443,7 +443,7 @@ const notesPanel = (kind, label, heading, innerHtml) => `
  * @param {{pdf:boolean, docx:boolean}} att  which attachments made it
  * @param {number} fullCount    how many articles to print in full (rest listed)
  */
-function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
+function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity, printedPaths = null) {
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   // The body is written once before the render work (which can fail) and again
@@ -529,12 +529,14 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
   let printed = 0;
   const overflow = [];
   const body = `
+    <!--ledger:notice-->
     <p class="t-body" style="margin:0 0 18px;font:400 15px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">${intro}</p>
     ${aside}
     ${missing}
     ${prs.map(pr => prHeader(pr) + pr.articles.map((a, i) => {
       if (printed >= fullCount) { overflow.push(a); return ''; }
       printed++;
+      if (printedPaths) printedPaths.push(a.path);
       return draftArticleHtml(a, { index: i + 1, total: pr.articles.length, prNumber: pr.number });
     }).join('')).join('')}
     ${overflow.length ? callout('Not shown here', `
@@ -584,7 +586,8 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity) {
 function fitEmailHtml(prs, generatedOn, att) {
   const total = prs.reduce((n, pr) => n + pr.articles.length, 0);
   for (let full = total; full >= 1; full--) {
-    const html = buildEmailHtml(prs, generatedOn, att, full);
+    const printedPaths = [];
+    const html = buildEmailHtml(prs, generatedOn, att, full, printedPaths);
     if (Buffer.byteLength(html) <= htmlBudget() || full === 1) {
       if (full < total) {
         console.log(`::warning::Email body too large for ${total} full drafts; printed ${full} in full, ` +
@@ -594,10 +597,10 @@ function fitEmailHtml(prs, generatedOn, att) {
         console.log(`::warning::Email body is ${Math.round(Buffer.byteLength(html) / 1024)} KB even with a single ` +
                     'draft in full; Gmail may clip it. Sent whole rather than truncated.');
       }
-      return html;
+      return { html, printedPaths };
     }
   }
-  return buildEmailHtml(prs, generatedOn, att, 0);
+  return { html: buildEmailHtml(prs, generatedOn, att, 0), printedPaths: [] };
 }
 
 function buildHtml(prs, generatedOn) {
@@ -811,10 +814,16 @@ async function main() {
     if (!process.env.DOCX_PATH) return false;
     try { return (await fs.stat(process.env.DOCX_PATH)).size > 0; } catch { return false; }
   };
+  // Returns the article paths this body actually printed IN FULL, which is not
+  // the same as the ones that rendered: the size guard demotes later drafts to
+  // a title in a list. Recording a demoted draft as reviewed locked it out for
+  // the week on the strength of a bullet point.
   const writeEmail = async (list, hasPdf) => {
-    if (!process.env.EMAIL_HTML_OUT) return;
+    if (!process.env.EMAIL_HTML_OUT) return [];
     const att = { pdf: hasPdf, docx: await docxOnDisk() };
-    await fs.writeFile(process.env.EMAIL_HTML_OUT, fitEmailHtml(list, generatedOn, att));
+    const { html, printedPaths } = fitEmailHtml(list, generatedOn, att);
+    await fs.writeFile(process.env.EMAIL_HTML_OUT, html);
+    return printedPaths;
   };
   await writeEmail(withAge(prs).map(pr => ({ ...pr, articles: [] })), false);
 
@@ -912,7 +921,7 @@ async function main() {
     const { size } = await fs.stat(OUT);
     console.log(`Wrote ${OUT} (${Math.round(size / 1024)} KB)`);
 
-    await writeEmail(rendered, true);
+    const printedPaths = new Set(await writeEmail(rendered, true));
     if (process.env.EMAIL_HTML_OUT) console.log(`Wrote ${process.env.EMAIL_HTML_OUT}`);
 
     /* Which pull requests actually had their article text put in front of the
@@ -921,9 +930,17 @@ async function main() {
        failed whenever a sibling's succeeded — recorded as reviewed, delivered
        as a bare link, shut out until the following Monday. */
     if (process.env.CARRIED_OUT) {
-      const carried = rendered.filter(pr => pr.articles.length).map(pr => String(pr.number));
+      // EVERY article of a pull request has to have been printed in full before
+      // that pull request counts as reviewed. One demoted or unrendered article
+      // is a draft the reviewer has not read, and recording it shuts it out
+      // until the following Monday.
+      const carried = rendered
+        .filter(pr => pr.articles.length
+                   && !(pr.skipped || []).length
+                   && pr.articles.every(a => printedPaths.has(a.path)))
+        .map(pr => String(pr.number));
       await fs.writeFile(process.env.CARRIED_OUT, JSON.stringify(carried));
-      console.log(`Carried the text of: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);
+      console.log(`Carried in full: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);
     }
   } finally {
     await browser.close();

@@ -307,11 +307,15 @@ jobs:
           # What the HTML body actually ended up carrying. The builder stamps
           # three numbers; the plain-text part is written from them rather than
           # from an assumption, because it is a whole message on its own.
-          stamp=$(grep -o '<!--ledger:[^>]*-->' "$html" 2>/dev/null | head -1)
+          # grep -m1, not `grep | head`: under the default shell a broken
+          # pipeline is survivable, but adding `shell: bash` (which turns on
+          # pipefail) would make this step fail and take every step after it —
+          # including the send — with it. No pipe, no trap.
+          stamp=''
+          if [ -s "$html" ]; then stamp=$(grep -m1 -o '<!--ledger:[^>]*-->' "$html" || true); fi
           num() { printf '%s' "$stamp" | sed -n "s/.*$1=\([0-9]*\).*/\1/p"; }
           arts=$(num articles); skip=$(num skipped); full=$(num full)
           arts=${arts:-0}; skip=${skip:-0}; full=${full:-0}
-          echo "articles=$arts" >> "$GITHUB_OUTPUT"
           if [ "$arts" = "0" ]; then
             cov='The drafts could not be rendered into this email — see the Actions log. Read them in the pull request above.'
             echo "::warning::The email body carries no article text this run."
@@ -353,40 +357,47 @@ jobs:
             const merged   = states.filter(s => s.merged);
             const rejected = states.filter(s => s.state === 'closed' && !s.merged);
             const live     = states.filter(s => s.state !== 'closed');
-            core.setOutput('open', merged.length || !live.length ? 'no' : 'yes');
+            const list = xs => xs.map(s => '#' + s.number).join(', ');
 
-            if (merged.length && !live.length) {
-              // Everything got published while we built. Clean no-op.
-              core.notice(`Every draft merged while this run was building; ledger-published.yml has ` +
-                          `the announcement. Nothing to review.`);
-            } else if (merged.length) {
-              // The body, the PDF and the Word note all say these drafts are
-              // "not live yet", which ledger-published.yml has just contradicted
-              // for the merged one. The artifacts cannot be amended at this
-              // point, so nothing is sent — and because the surviving drafts
-              // lose their slot, this FAILS rather than passing green. A silent
-              // week of no review is the outcome this workflow exists to
-              // prevent; a red run at least emails the admin.
-              core.setFailed(
-                `${merged.map(s => '#' + s.number).join(', ')} merged while this run was building, so ` +
-                `the review it built is out of date and was not sent. ` +
-                `${live.map(s => '#' + s.number).join(', ')} still need review — re-run this workflow ` +
-                `to rebuild and send. The send record was not written, so nothing is locked out.`);
-            } else if (rejected.length) {
-              // Nothing here contradicts the publish notice, so the review still
-              // goes out for the drafts that survive — muting it used to cost
-              // them a full week. But the subject line, the plain-text list, the
-              // PDF and the Word note were all built before the close and still
-              // present the rejected draft as awaiting review, so the email says
-              // so plainly rather than letting the reader trust a stale count.
-              const names = rejected.map(s => '#' + s.number).join(', ');
-              core.setOutput('note',
-                `NOTE: ${names} ${rejected.length === 1 ? 'was' : 'were'} closed without merging while ` +
-                `this email was being prepared. Ignore ${rejected.length === 1 ? 'it' : 'them'} below — ` +
-                `the count, the attachments and the list were built moments earlier.`);
-              core.warning(`${names} closed unmerged during the build; sending the review for the ` +
-                           `${live.length} still open, with a correction note.`);
+            // Send whenever anything is still open. Suppressing instead used to
+            // cost the surviving drafts their slot — and on the Monday floor
+            // there is no later trigger, so one well-timed merge took the whole
+            // week's review with it. What the email cannot do is stay silent
+            // about the change: the body, the PDF and the Word note were all
+            // written minutes ago and all still present these drafts as
+            // awaiting review. The correction goes in as a banner at the top of
+            // the reader's own view — see automation/ledger-email-notice.mjs.
+            core.setOutput('open', live.length ? 'yes' : 'no');
+
+            const parts = [];
+            if (merged.length) {
+              parts.push(`${list(merged)} ${merged.length === 1 ? 'was' : 'were'} merged and ` +
+                         `${merged.length === 1 ? 'is' : 'are'} publishing to jparkassociates.com now`);
             }
+            if (rejected.length) {
+              parts.push(`${list(rejected)} ${rejected.length === 1 ? 'was' : 'were'} closed without merging`);
+            }
+            if (parts.length && live.length) {
+              core.setOutput('note',
+                `${parts.join('; ')} while this email was being prepared. The count above, the ` +
+                `attachments and the article text below were all built moments earlier, so ignore ` +
+                `${merged.length + rejected.length === 1 ? 'that one' : 'those'} — ` +
+                `${list(live)} ${live.length === 1 ? 'is' : 'are'} what still needs review.`);
+              core.warning(`${parts.join('; ')}; sending the review for ${list(live)} with a correction banner.`);
+            } else if (parts.length) {
+              core.notice(`${parts.join('; ')}. Nothing left to review, so no email.`);
+            }
+
+      # An HTML comment renders as nothing, so this is a no-op when there is
+      # nothing to correct. Never fatal: a correction that cannot be applied
+      # still rides in the plain-text part below.
+      - name: Add a late correction to the email, if anything changed
+        if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes' && steps.recheck.outputs.note != ''
+        continue-on-error: true
+        env:
+          EMAIL_HTML: ${{ steps.mail.outputs.html }}
+          NOTICE: ${{ steps.recheck.outputs.note }}
+        run: node automation/ledger-email-notice.mjs
 
       - name: Email the weekly review
         if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
@@ -446,7 +457,7 @@ jobs:
         run: |
           prev='${{ runner.temp }}/prev.json'
           carried='${{ runner.temp }}/carried.json'
-          if [ ! -s "$carried" ]; then
+          if [ ! -s "$carried" ] || [ "$(cat "$carried")" = "[]" ]; then
             echo "::warning::No draft's text reached this email, so the week is NOT marked done; the next run will try again."
             echo "keep=no" >> "$GITHUB_OUTPUT"
             exit 0
