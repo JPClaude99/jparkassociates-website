@@ -133,30 +133,21 @@ jobs:
         run: |
           html='${{ runner.temp }}/email.html'
           pdf='${{ runner.temp }}/ledger-drafts.pdf'
-          if [ -s "$html" ]; then echo "html=file://$html" >> "$GITHUB_OUTPUT"; else echo "html=" >> "$GITHUB_OUTPUT"; fi
+          if [ -s "$html" ]; then echo "html=$html" >> "$GITHUB_OUTPUT"; else echo "html=" >> "$GITHUB_OUTPUT"; fi
           if [ -s "$pdf" ];  then echo "pdf=$pdf"          >> "$GITHUB_OUTPUT"; else echo "pdf=" >> "$GITHUB_OUTPUT"; fi
           [ -s "$pdf" ]  || echo "::warning::No draft review PDF this run; sending the alert without it."
           [ -s "$html" ] || echo "::warning::No branded HTML body this run; falling back to plain text."
 
       - name: Email the alert
         if: steps.find.outputs.count != '0'
-        uses: dawidd6/action-send-mail@v18
+        # Sender lives in the composite action, not here — see its header.
+        uses: ./.github/actions/send-ledger-email
         with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          secure: true
-          username: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
-          password: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
-          # Gmail only lets you send as the authenticated mailbox itself or an
-          # address verified on it under Settings → Accounts → "Send mail as".
-          # If marketing@ is not verified on the LEDGER_ALERT_SMTP_USER account,
-          # Gmail rewrites the From (or rejects with 550-5.7.1) — the display
-          # name and avatar in the inbox follow whichever address actually sends.
-          from: The Ledger Bot <marketing@jparkassociates.com>
-          to: jasonpark@jparkassociates.com
+          smtp_user: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
+          smtp_pass: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
           subject: ${{ steps.find.outputs.subject }}
+          html_file: ${{ steps.mail.outputs.html }}
           attachments: ${{ steps.mail.outputs.pdf }}
-          html_body: ${{ steps.mail.outputs.html }}
           # Plain-text alternative, always sent alongside the HTML part.
           body: |
             A Ledger article is drafted but not yet live on jparkassociates.com.
