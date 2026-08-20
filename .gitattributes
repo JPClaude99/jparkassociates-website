@@ -1,0 +1,7 @@
+# Shell scripts must keep LF endings even when checked out on Windows.
+# Git for Windows defaults to core.autocrlf=true, which would rewrite these to
+# CRLF and make bash fail on every line with: $'\r': command not found
+*.sh text eol=lf
+
+# PowerShell is fine either way, but pin it so the file is stable across clones.
+*.ps1 text eol=crlf
