@@ -202,4 +202,42 @@ calibration. The rules they embody:
     the action date for each. If a drafted article is time-sensitive, say the
     merge-by date here too.
 
+### The PR body is parsed — keep the per-article shape
+
+`ledger-draft-alert.yml` builds a PDF review packet from the PR body
+(`automation/ledger-draft-pdf.mjs`) and emails it. Each article is rendered as
+it will read on the site, followed by a REVIEWER NOTES panel holding *that
+article's* section of this body. The binding is the backticked article path
+under a numbered heading, so write each article block exactly like this:
+
+```markdown
+## 1. <article title>
+`blog/<slug>.html` · category `deadlines` · 5 min
+
+**Source**
+- [IRS — page title](https://…)
+
+**Why it matters**
+…
+
+**Merge-by:** … (only if time-sensitive)
+```
+
+Two rules the parser depends on:
+
+- The heading must start with a number and a period (`## 1.`, `## 2.`).
+- The article's repo path must appear in backticks inside that section, and
+  must match the file the PR actually adds.
+
+Sections that are *not* per-article — `## Confidence notes`, `## Also noticed
+(not drafted)`, `## Upcoming (not yet drafted)` — need no special shape. They
+are collected into a single RUN NOTES panel at the end of the packet. Article
+order in the packet follows your numbering, not the filenames.
+
+Nothing here is load-bearing for correctness: if a heading is unnumbered or a
+path doesn't match, that section simply lands in RUN NOTES and the article gets
+a "no notes found — check the PR directly" panel. The packet degrades, it never
+fails. But the notes are far more useful sitting under their own article, so
+keep the shape.
+
 Justin merges → GitHub Pages deploys automatically. That's the whole release.
