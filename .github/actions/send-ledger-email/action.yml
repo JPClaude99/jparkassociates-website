@@ -39,11 +39,17 @@ inputs:
     required: false
     default: ''
   attachments:
-    description: Comma-separated file paths. Empty means none.
+    description: >
+      Comma-separated file paths. Empty means none. Each file is attached under
+      its basename, so name the file on disk what the reader should see —
+      ledger-drafts.pdf, Ledger-review-notes.docx.
     required: false
     default: ''
   to:
-    description: Recipient.
+    description: >
+      Recipient. Every Ledger email goes to Justin unless a caller says
+      otherwise, so the address is defaulted here rather than repeated in each
+      workflow — one place to change it if it ever moves.
     required: false
     default: jasonpark@jparkassociates.com
   smtp_user:

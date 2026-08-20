@@ -204,11 +204,19 @@ calibration. The rules they embody:
 
 ### The PR body is parsed — keep the per-article shape
 
-`ledger-draft-alert.yml` builds a PDF review packet from the PR body
-(`automation/ledger-draft-pdf.mjs`) and emails it. Each article is rendered as
-it will read on the site, followed by a REVIEWER NOTES panel holding *that
-article's* section of this body. The binding is the backticked article path
-under a numbered heading, so write each article block exactly like this:
+`ledger-draft-alert.yml` runs the moment this scan finishes and emails Justin
+the week's review. Three things are built from the PR body you write here:
+
+- the **email body** — each drafted article reproduced in full, branded
+  (`automation/ledger-draft-pdf.mjs`);
+- **ledger-drafts.pdf** — the same articles laid out for print, each followed
+  by a REVIEWER NOTES panel holding *that article's* section of this body;
+- **Ledger-review-notes.docx** — those notes on their own, in Word, for Justin
+  to mark up (`automation/ledger-review-notes-docx.mjs`).
+
+All three bind notes to articles the same way, through
+`automation/ledger-notes.mjs`: the backticked article path under a numbered
+heading. Write each article block exactly like this:
 
 ```markdown
 ## 1. <article title>

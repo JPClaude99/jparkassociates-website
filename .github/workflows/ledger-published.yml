@@ -2,7 +2,8 @@ name: Ledger published
 
 # Emails jasonpark@jparkassociates.com once, when a [Ledger] pull request merges
 # and its articles go live on jparkassociates.com. The companion to
-# ledger-draft-alert.yml, which nags daily until that merge happens.
+# ledger-draft-alert.yml, which sends the weekly review email that gets the
+# article read in the first place.
 #
 # Every Ledger email comes from the same identity — The Ledger Bot
 # <marketing@jparkassociates.com> — so the thread reads as one voice. Gmail only
@@ -15,7 +16,14 @@ name: Ledger published
 # automation publishes nothing and sends nothing — that is a clean no-op, not a
 # failure.
 #
-# Uses the same two secrets as the draft alert; see that file's header for the
+# But a PR that adds blog/<slug>.html WITHOUT adding it to blog/posts.js is not
+# a no-op: the article is live on the site and missing from the index, so no
+# reader will ever reach it. That case FAILS the run on purpose. GitHub then
+# emails the repo admin about the failed run, which is the only thing that
+# turns a silently-orphaned article into something anyone finds out about.
+# Fix the manifest, then re-send the notice with the workflow_dispatch below.
+#
+# Uses the same two secrets as the weekly review; see that file's header for the
 # App Password setup and its gotchas.
 
 on:
@@ -31,19 +39,75 @@ permissions:
   contents: read
   pull-requests: read
 
+# PER PULL REQUEST, and this must stay per pull request.
+#
+# A single repo-wide group looks tidier and silently loses mail: GitHub keeps at
+# most ONE pending run per group and cancels the previously pending one, so a
+# reviewer working through the weekly review email and merging #40, #41 and #42
+# in the same minute gets notices for #40 and #42 while #41's is cancelled
+# outright. Cancelled is not failed, so nobody is emailed about it either — the
+# article is live and unannounced. Keyed per pull request, all three run.
+#
+# `pull_request.number` is read first so the automatic path always groups on a
+# real integer. A dispatch typed as "#42" therefore lands in its own group
+# rather than joining `ledger-published-42`; the cost is that a manual re-send
+# is not serialised against a merge of the same PR, which is a possible
+# duplicate — strictly better than a possible silent drop.
+concurrency:
+  group: ledger-published-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: false
+
 jobs:
   notify:
     # Only merged Ledger PRs. A closed-without-merge PR published nothing.
     # Manual dispatch is always allowed — it re-sends the notice for a PR you name.
+    # INTO THE DEFAULT BRANCH, and this matters. GitHub Pages serves the
+    # default branch, so a [Ledger] pull request merged anywhere else has
+    # published nothing — and this notice says, in as many words, that the
+    # article "is publishing to jparkassociates.com now". Merging a stacked or
+    # held-back branch used to send that notice for a file no reader could
+    # reach, and then send it a SECOND time when that branch itself reached the
+    # default branch and the same blog/*.html came through as added again.
+    # A dispatch names a pull request explicitly and is always allowed.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == github.event.repository.default_branch &&
        (startsWith(github.event.pull_request.title, '[Ledger]') ||
         startsWith(github.event.pull_request.head.ref, 'ledger/auto-')))
     runs-on: ubuntu-latest
 
     steps:
+      # Digits only. A pasted "#42" would 404 the API and, separately, produce a
+      # concurrency group that does not match the automatic path's.
+      - name: Read the pull request number
+        id: pr
+        env:
+          # Through the environment, not interpolated into the script — this is
+          # free text from a dispatch form, and the sanitiser has to run on it
+          # rather than after it has already become part of the command.
+          RAW: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+        run: |
+          n=$(printf '%s' "$RAW" | tr -cd '0-9')
+          [ -n "$n" ] || { echo "::error::pr_number must be a number."; exit 1; }
+          echo "number=$n" >> "$GITHUB_OUTPUT"
+
+      # A "Re-run all jobs" on a SUCCESSFUL run used to re-send a byte-identical
+      # notice. Keyed on the merge commit, so a genuine re-merge is a new event.
+      # workflow_dispatch deliberately skips the check — a manual re-send is the
+      # documented way to send this notice again.
+      - name: Has this merge already been announced?
+        id: lock
+        if: github.event_name != 'workflow_dispatch'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/announced
+          key: ledger-published-${{ steps.pr.outputs.number }}-${{ github.event.pull_request.merge_commit_sha }}
+          lookup-only: true
+
       - name: Check out the site after the merge
+        if: steps.lock.outputs.cache-hit != 'true'
         uses: actions/checkout@v6
         with:
           # The base branch as it now stands — the merge is already in it, so
@@ -51,28 +115,47 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
 
       - name: Set up Node
+        if: steps.lock.outputs.cache-hit != 'true'
         uses: actions/setup-node@v5
         with:
           node-version: '24'
 
+      # THE STEP ALWAYS EXITS 0; the job is failed deliberately further down.
+      # The builder writes the notice for every article it CAN announce and then
+      # raises the orphan alarm, and the exit code has to be CAUGHT rather than
+      # allowed to propagate: GitHub runs a Linux `run:` under `bash -e`, so a
+      # non-zero `node` aborted the script on its first line and the
+      # $GITHUB_OUTPUT block below never ran — the notice was built, discarded,
+      # and never sent, which is exactly what catching the alarm was meant to
+      # prevent. `continue-on-error` does not help here: it changes the step's
+      # conclusion, not the shell's -e.
       - name: Build the publish notice
         id: build
+        if: steps.lock.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
           EMAIL_HTML_OUT: ${{ runner.temp }}/published.html
           EMAIL_TEXT_OUT: ${{ runner.temp }}/published.txt
           SUBJECT_OUT: ${{ runner.temp }}/subject.txt
         run: |
-          node automation/ledger-published-email.mjs
+          rc=0
+          node automation/ledger-published-email.mjs || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
           if [ -s "${{ runner.temp }}/published.html" ]; then
             echo "send=yes" >> "$GITHUB_OUTPUT"
-            { echo "subject<<EOF"; cat "${{ runner.temp }}/subject.txt"; echo; echo "EOF"; } >> "$GITHUB_OUTPUT"
-            { echo "text<<EOF";    cat "${{ runner.temp }}/published.txt"; echo; echo "EOF"; } >> "$GITHUB_OUTPUT"
+            # A fixed "EOF" delimiter is a corrupt $GITHUB_OUTPUT waiting for the
+            # day an article body contains that line. Use one nothing can guess.
+            d="EOF_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+            # Subjects are one line by construction; make that true by force
+            # rather than by assumption — a newline here would break the header.
+            echo "subject=$(tr '\n' ' ' < "${{ runner.temp }}/subject.txt" | sed 's/ *$//')" >> "$GITHUB_OUTPUT"
+            { echo "text<<$d"; cat "${{ runner.temp }}/published.txt"; echo; echo "$d"; } >> "$GITHUB_OUTPUT"
           else
             echo "send=no" >> "$GITHUB_OUTPUT"
             echo "::notice::No articles published by this pull request; no email sent."
           fi
+          exit 0
 
       - name: Email the publish notice
         if: steps.build.outputs.send == 'yes'
@@ -84,3 +167,24 @@ jobs:
           subject: ${{ steps.build.outputs.subject }}
           html_file: ${{ runner.temp }}/published.html
           body: ${{ steps.build.outputs.text }}
+
+      # After the send, so the notice is away before the run goes red. GitHub
+      # emails the repo admin about a failed run, and that is the alarm.
+      - name: Fail if the builder raised the orphan alarm
+        if: steps.lock.outputs.cache-hit != 'true' && steps.build.outputs.rc != '0'
+        run: |
+          echo "::error::The publish notice builder failed — see its step above. An article may be live and missing from blog/posts.js."
+          exit 1
+
+      - name: Remember that this merge was announced
+        if: github.event_name != 'workflow_dispatch' && steps.build.outputs.send == 'yes'
+        continue-on-error: true
+        run: mkdir -p '${{ runner.temp }}/announced' && date -u > '${{ runner.temp }}/announced/at'
+
+      - name: Keep that record
+        if: github.event_name != 'workflow_dispatch' && steps.build.outputs.send == 'yes'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/announced
+          key: ledger-published-${{ steps.pr.outputs.number }}-${{ github.event.pull_request.merge_commit_sha }}

@@ -6,3 +6,7 @@
 # and the MP4 (Safari/iOS fallback) — so they're excepted from the mask.
 *.mp4
 !assets/video/*.mp4
+
+# npm deps the Ledger email automation installs on the runner (never committed)
+node_modules
+package-lock.json

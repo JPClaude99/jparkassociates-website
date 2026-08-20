@@ -1,59 +1,182 @@
-name: Ledger draft alert
+name: Ledger draft review
 
-# Emails jasonpark@jparkassociates.com whenever a Ledger article has been
-# DRAFTED but not yet PUBLISHED — i.e. an open pull request whose title starts
-# with "[Ledger]" or whose branch is ledger/auto-*. Merging that PR is what
-# deploys the article to jparkassociates.com, so an unmerged Ledger PR is
-# exactly "a draft is ready but not live."
+# THE WEEKLY REVIEW EMAIL
 #
-# The email carries a PDF review packet built by automation/ledger-draft-pdf.mjs:
-# each drafted article rendered as it will read on the site, and after each one a
-# REVIEWER NOTES panel (cream ground, sans headings — deliberately not article
-# styling) holding that article's section of the PR body. Confidence notes, "also
-# noticed" and "upcoming" land in a RUN NOTES panel at the end.
+# One email a week, on Monday, carrying every Ledger article that has been
+# drafted and is waiting to be published. It contains:
 #
-# Why this is failproof (no dependence on any running Claude session):
-#   • schedule            — checks every day and RE-emails as long as a draft
-#                           sits unmerged, so one missed email is never fatal.
-#   • pull_request         — also fires the instant a draft PR is opened.
-#   • workflow_dispatch    — run the check on demand from the Actions tab.
-#   • If the SMTP secrets below are missing/wrong, the email step FAILS, which
-#     makes GitHub email the repo admin about the failed run — so you are
-#     alerted even when the alerting itself is misconfigured.
-#   • If the PDF cannot be built the email still goes out, saying so in the body.
-#     Losing the packet must never cost you the alert.
+#   • the full text of each draft, in the body, branded and readable in the
+#     inbox — no GitHub, no attachment needed to judge the writing;
+#   • ledger-drafts.pdf         — the same drafts laid out for print, each
+#                                 followed by its reviewer-notes panel;
+#   • Ledger-review-notes.docx  — the reviewer notes on their own, in Word,
+#                                 ready to mark up and send back.
 #
-# ── One-time setup (≈3 minutes) ────────────────────────────────────────────
+# Merging the pull request is what deploys the article to jparkassociates.com;
+# ledger-published.yml then sends the short "it's live" notice.
+#
+# ── CADENCE: two triggers and a lock, not one trigger ─────────────────────
+# Monday, once. Getting that right needs a fast path, a floor, and something
+# that stops the two from ever mailing the same thing twice.
+#
+#   FAST PATH — `workflow_run` on `Ledger announcement scan`, the Monday job
+#   that actually drafts the articles. Firing off its completion rather than
+#   off a clock of our own means we never race it: the drafts exist by the time
+#   we look. This is what sends the email on a normal week.
+#
+#   FLOOR — a Monday cron, late enough that the fast path has long since run.
+#   `workflow_run` is edge-triggered and edges get missed: the scan can fail
+#   before it opens the PR, be disabled, or simply not run. The floor covers
+#   those. It does NOT cover the one failure that would take both down at once
+#   — GitHub suspending every scheduled workflow in a repo idle for 60 days —
+#   because the floor is itself a cron. Nothing inside this repo can cover
+#   that; GitHub emails the admin when it suspends, and a commit re-enables it.
+#
+#   LOCK — a per-week send record listing the pull requests already emailed.
+#   Every trigger, every re-run and every manual dispatch reads it first and
+#   emails only the drafts not already in it.
+#
+#   The key is the pull request NUMBER and nothing else. Not the set of open
+#   drafts: merging one of two changed a set-shaped key, and the 20:00 floor
+#   re-sent the whole review five hours after the 15:00 one. And not the head
+#   SHA either, which had the same fault one level down — a one-word copyedit,
+#   a rebase, or the "Update branch" button moves the head, and the floor read
+#   that as a draft it had never seen. Once a week means once a week, whatever
+#   the branch does in between.
+#
+#   Next Monday the week rolls over and an unreviewed draft resurfaces — that
+#   nag is deliberate, and it is the only thing standing between a forgotten
+#   draft and permanent silence.
+#
+# What is NOT a trigger, and must never become one again: `pull_request`. The
+# previous version of this file fired on it, unfiltered, so every unrelated PR
+# opened anywhere in the repo re-sent the whole alert. This mail is about the
+# state of the drafts, not about any one pull request.
+#
+# ── FAILURE BEHAVIOUR ─────────────────────────────────────────────────────
+#   • Both builders are continue-on-error, and the email names only the
+#     enclosures that actually reached disk. Losing an attachment never costs
+#     you the email.
+#   • The de-duplication lock fails OPEN. If the cache service is unreachable
+#     the record reads empty and the email goes out — a duplicate is an
+#     annoyance, a missed review is a week of lost work.
+#   • A review that reaches the inbox WITHOUT the article text does not mark
+#     the week done, so the next trigger tries again. If the first attempt was
+#     degraded and the second succeeds, the reviewer gets two emails that week
+#     — deliberately. Two alerts beat one alert and no review.
+#   • That retry is CAPPED AT TWO ATTEMPTS PER DRAFT PER WEEK, counted in the
+#     record, not inferred from the trigger. "There are only two triggers in a
+#     week" was never true: the announcement scan has workflow_dispatch and can
+#     be re-run after a failure, and every completion fires this workflow, so
+#     three scan runs used to mean three review emails for any draft that had
+#     not rendered. The cap holds however many times the scan runs.
+#   • The lock lives in a BRANCH-SCOPED Actions cache, so a manual dispatch
+#     from any ref other than the default branch would neither see nor write
+#     the record the scheduled runs use, and would duplicate. That case is
+#     refused outright rather than silently duplicating.
+#   • The two builders are independent: the Word note needs no browser, so a
+#     Chromium failure cannot take it down with the PDF.
+#   • If the SMTP secrets are missing or wrong the send step FAILS, and GitHub
+#     emails the repo admin about the failed run — so a silently-dead alerter
+#     is not a failure mode.
+#   • Nothing open to review → no email. That is a clean no-op, not a failure.
+#
+# ── One-time setup (≈3 minutes) ───────────────────────────────────────────
 # Add two repository secrets under:
 #   Settings → Secrets and variables → Actions → New repository secret
-#     LEDGER_ALERT_SMTP_USER   a Gmail / Google Workspace address to send FROM
-#     LEDGER_ALERT_SMTP_PASS   a Google App Password for that address
+#     LEDGER_ALERT_SMTP_USER   the Gmail / Google Workspace mailbox to send FROM
+#     LEDGER_ALERT_SMTP_PASS   a Google App Password for that mailbox
 # Create the App Password at myaccount.google.com → Security → 2-Step
 # Verification → App passwords, and store it as the 16 characters with NO
 # SPACES — Google displays it in four groups, and pasting the spaces is the
 # usual cause of "535-5.7.8 Username and Password not accepted".
 # (Workspace accounts: an admin may first need to allow app passwords for the
 # org.) LEDGER_ALERT_SMTP_USER must be the mailbox the App Password belongs to,
-# not an alias. The "to" address is set below.
+# not an alias. The From identity and the recipient live in the composite
+# action, .github/actions/send-ledger-email.
 # ───────────────────────────────────────────────────────────────────────────
 
 on:
+  # Fast path: the moment the Monday scan finishes.
+  workflow_run:
+    workflows: ["Ledger announcement scan"]
+    types: [completed]
+    # No `branches:` filter — a trigger cannot read an expression, so naming the
+    # default branch here hard-codes it, and renaming the branch would silently
+    # stop the fast path firing while everything still looked healthy. The job
+    # guard below tests it against the repository's actual default branch.
+  # Floor: Mondays 20:00 UTC — 13:00 Pacific in summer, 12:00 in winter. Hours
+  # after the 15:00 UTC scan, so on a normal week the lock below has already
+  # been taken and this run sends nothing. It exists for the weeks the scan
+  # never ran at all.
   schedule:
-    - cron: '0 15 * * *'      # 15:00 UTC ≈ 08:00 America/Los_Angeles, daily
-  pull_request:
-    types: [opened, reopened, ready_for_review]
+    - cron: '0 20 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: read
 
+# QUEUE, never cancel. The send is the last step, behind an npm install and a
+# Chromium render, so cancel-in-progress would sooner or later kill a run that
+# had already sent — or, worse, kill one that was about to. Queuing is safe
+# because the second run re-checks the lock and finds it taken.
+concurrency:
+  group: ledger-draft-review
+  cancel-in-progress: false
+
 jobs:
-  ledger-draft-alert:
+  ledger-draft-review:
+    # A SKIPPED scan never started, so there is nothing to report. A CANCELLED
+    # one is different — the agent opens its pull request partway through the
+    # run and keeps working afterwards, so an operator who cancels a thrashing
+    # scan may well be cancelling it after the draft exists. Not emailing then
+    # is the deliberate choice: a cancelled run is one nobody trusts the output
+    # of, and Monday's 20:00 floor picks the draft up on its own. A midweek
+    # cancellation therefore waits for the next Monday, which is the cadence
+    # this workflow promises anyway.
+    # A FAILED scan still runs — it may well have opened the pull request
+    # before dying, and the lock stops the retry mailing twice.
+    if: >
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+       github.event.workflow_run.conclusion != 'cancelled' &&
+       github.event.workflow_run.conclusion != 'skipped')
     runs-on: ubuntu-latest
 
     steps:
-      - name: Find open, unmerged Ledger drafts
+      # The lock is an Actions cache, and cache SCOPING is asymmetric: a run on
+      # a topic branch can READ caches saved on the default branch, but anything
+      # it saves is scoped to the topic branch and is invisible to the scheduled
+      # runs on the default branch. So a dispatch from another ref would see the
+      # record, correctly send nothing new — and then, if it did send, write a
+      # record no later run can read, and the floor would mail a second copy.
+      # Refuse instead: run it from the default branch, where both halves work.
+      - name: This week, on the right branch
+        id: week
+        env:
+          # Through the environment, never interpolated into the script: a ref
+          # name may legally contain a backtick, a $ or a semicolon, and this
+          # step's whole job is to be the thing that cannot be talked around.
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$REF" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Run this workflow from $DEFAULT_BRANCH. The de-duplication record is a branch-scoped Actions cache, so a run from $REF cannot see it and would send a duplicate review email."
+            exit 1
+          fi
+          # ISO year and week, from date(1) rather than hand-rolled arithmetic.
+          echo "id=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Load this week's send record
+        continue-on-error: true          # unreachable cache -> empty record -> send
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/ledger-sent
+          key: ledger-review-${{ steps.week.outputs.id }}-probe
+          restore-keys: ledger-review-${{ steps.week.outputs.id }}-
+
+      - name: Find Ledger drafts not yet emailed this week
         id: find
         uses: actions/github-script@v8
         env:
@@ -61,17 +184,48 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            // Which pull requests have already been emailed this week.
+            // Missing or unreadable reads as empty, which sends — see the
+            // fail-open note in the header.
+            const RECORD = '${{ runner.temp }}/ledger-sent/sent.json';
+            /* { done: ["70"], tries: { "71": 2 } }
+               `done`  — the draft's text reached the inbox; never send again this week.
+               `tries` — how many emails have NAMED this draft this week. Two is the
+                         cap: the first attempt may be degraded, the second is the
+                         retry, and a third is a duplicate however it was triggered.
+               A bare array is the old shape and means "done", so a record written
+               by the previous version of this workflow still suppresses correctly. */
+            const MAX_TRIES = 2;
+            let rec = { done: [], tries: {} };
+            try { rec = JSON.parse(fs.readFileSync(RECORD, 'utf8')); } catch { /* first run this week */ }
+            if (Array.isArray(rec)) rec = { done: rec, tries: {} };
+            const done  = new Set((rec && Array.isArray(rec.done) ? rec.done : []).map(String));
+            const tries = (rec && rec.tries && typeof rec.tries === 'object') ? rec.tries : {};
+
             const prs = await github.paginate(github.rest.pulls.list, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
               per_page: 100,
             });
-            const drafts = prs.filter(p =>
+            const open = prs.filter(p =>
               !p.draft &&
               (p.title.startsWith('[Ledger]') ||
                (p.head && p.head.ref && p.head.ref.startsWith('ledger/auto-')))
             );
+            // Pull request number only — see the LOCK note in the header for why
+            // the head SHA is deliberately not part of this.
+            const keyOf = p => String(p.number);
+            const spent = p => Number(tries[keyOf(p)] || 0) >= MAX_TRIES;
+            const drafts = open.filter(p => !done.has(keyOf(p)) && !spent(p));
+            const held = open.length - drafts.length;
+            if (held) core.info(`${held} draft(s) already emailed this week; not resending.`);
+            const capped = open.filter(p => !done.has(keyOf(p)) && spent(p)).map(keyOf);
+            if (capped.length) {
+              core.warning(`#${capped.join(', #')} had ${MAX_TRIES} review emails this week without ` +
+                           'their text rendering, so no more will be sent until next Monday. ' +
+                           'Fix the article and re-run, or dispatch this workflow.');
+            }
             core.setOutput('count', String(drafts.length));
             const body = drafts.map(p => {
               const ageH = Math.round((Date.now() - Date.parse(p.created_at)) / 36e5);
@@ -79,10 +233,13 @@ jobs:
               return `#${p.number} — ${p.title}\n${p.html_url}\n(open ${age} · branch ${p.head.ref})`;
             }).join('\n\n');
             core.setOutput('body', body);
+            // The PR title already starts with "[Ledger]"; the subject says so
+            // in words, so strip the tag rather than printing it twice.
+            const plain = t => t.replace(/^\[Ledger\]\s*/, '');
             core.setOutput('subject', drafts.length === 1
-              ? `Ledger draft awaiting publish: ${drafts[0].title}`
-              : `${drafts.length} Ledger drafts awaiting publish`);
-            // Hand the PDF builder what it needs. Written to a file rather than a
+              ? `Ready for review: ${plain(drafts[0].title)}`
+              : `${drafts.length} Ledger drafts ready for review`);
+            // Hand the builders what they need. Written to a file rather than a
             // step output: PR bodies are long and contain arbitrary markdown.
             fs.writeFileSync(process.env.DRAFTS_JSON, JSON.stringify(drafts.map(p => ({
               number: p.number,
@@ -92,73 +249,360 @@ jobs:
               head: { sha: p.head.sha, ref: p.head.ref },
               created_at: p.created_at,
             }))));
+            // What the week already had. The record this run writes is this
+            // list plus the drafts whose text actually reached the inbox — the
+            // builder decides that, not this step. Written into place only
+            // after the email is away, so a run that dies mid-build leaves the
+            // record untouched and the next trigger finishes the job.
+            fs.writeFileSync('${{ runner.temp }}/prev.json',
+                             JSON.stringify({ done: [...done], tries }));
+
             if (drafts.length) {
-              core.notice(`Ledger drafts open and unmerged: ${drafts.map(p => '#' + p.number).join(', ')}`);
+              core.notice(`Ledger drafts awaiting review: ${drafts.map(p => '#' + p.number).join(', ')}`);
             } else {
-              core.info('No open Ledger drafts — nothing to alert.');
+              core.info('Nothing new to review this week — no email.');
             }
 
-      - name: Check out the PDF builder
-        if: steps.find.outputs.count != '0'
+      # One place to compute "should this run do anything", so the steps below
+      # carry a short condition instead of many copies of a long one.
+      - name: Decide whether to build and send
+        id: gate
+        run: |
+          if [ "${{ steps.find.outputs.count }}" = "0" ]; then
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the builders
+        if: steps.gate.outputs.go == 'yes'
         uses: actions/checkout@v6
         with:
-          # Always the default branch's builder — this workflow also runs on
-          # `pull_request`, and a PR must not get to run its own version of it.
+          # Always the default branch's builders, never a pull request's.
           ref: ${{ github.event.repository.default_branch }}
 
       - name: Set up Node
-        if: steps.find.outputs.count != '0'
+        if: steps.gate.outputs.go == 'yes'
+        continue-on-error: true
         uses: actions/setup-node@v5
         with:
           node-version: '24'
 
-      - name: Build the draft review PDF
-        id: pdf
-        if: steps.find.outputs.count != '0'
-        continue-on-error: true      # the alert matters more than the attachment
+      # continue-on-error, like the builders it feeds. A transient registry
+      # blip used to fail the job outright and send NOTHING — which is the one
+      # outcome this workflow exists to prevent. Without the packages the two
+      # build steps fail, the enclosures are absent, and the plain-text alert
+      # still goes out naming the pull request.
+      - name: Install the builders' dependencies
+        if: steps.gate.outputs.go == 'yes'
+        continue-on-error: true
+        run: npm install --no-save --no-audit --no-fund puppeteer@25 marked@18 docx@9
+
+      # Word first, and on purpose: it needs no browser, so it is still on disk
+      # for the email to name even if Chromium falls over in the next step.
+      - name: Build the Word review note
+        if: steps.gate.outputs.go == 'yes'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRAFTS_JSON: ${{ runner.temp }}/drafts.json
+          DOCX_OUT: ${{ runner.temp }}/Ledger-review-notes.docx
+        run: node automation/ledger-review-notes-docx.mjs
+
+      # Writes both the PDF packet and the HTML email body — the body carries a
+      # full copy of every draft, from the same extraction pass as the PDF, so
+      # the two can never describe different articles.
+      - name: Build the draft review PDF and email body
+        if: steps.gate.outputs.go == 'yes'
+        continue-on-error: true      # the email matters more than the packet
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRAFTS_JSON: ${{ runner.temp }}/drafts.json
           OUT_PATH: ${{ runner.temp }}/ledger-drafts.pdf
+          DOCX_PATH: ${{ runner.temp }}/Ledger-review-notes.docx
           EMAIL_HTML_OUT: ${{ runner.temp }}/email.html
-        run: |
-          npm install --no-save --no-audit --no-fund puppeteer@25 marked@18
-          node automation/ledger-draft-pdf.mjs
+          CARRIED_OUT: ${{ runner.temp }}/carried.json
+          COUNTS_OUT: ${{ runner.temp }}/counts.json
+        run: node automation/ledger-draft-pdf.mjs
 
-      # Decide from what is actually on disk, not from the build's exit code —
-      # the builder writes the branded email body before the work that can fail.
+      # Decide from what is actually on disk, not from either build's exit code —
+      # the PDF builder writes the branded email body before the work that can fail.
       - name: Decide what the email can carry
         id: mail
-        if: steps.find.outputs.count != '0'
+        if: steps.gate.outputs.go == 'yes'
+        env:
+          FIND_COUNT: ${{ steps.find.outputs.count }}
         run: |
           html='${{ runner.temp }}/email.html'
           pdf='${{ runner.temp }}/ledger-drafts.pdf'
+          docx='${{ runner.temp }}/Ledger-review-notes.docx'
+          att=''
           if [ -s "$html" ]; then echo "html=$html" >> "$GITHUB_OUTPUT"; else echo "html=" >> "$GITHUB_OUTPUT"; fi
-          if [ -s "$pdf" ];  then echo "pdf=$pdf"          >> "$GITHUB_OUTPUT"; else echo "pdf=" >> "$GITHUB_OUTPUT"; fi
-          [ -s "$pdf" ]  || echo "::warning::No draft review PDF this run; sending the alert without it."
-          [ -s "$html" ] || echo "::warning::No branded HTML body this run; falling back to plain text."
+          if [ -s "$pdf" ];  then att="$pdf";  else echo "::warning::No draft review PDF this run; sending without it."; fi
+          if [ -s "$docx" ]; then att="${att:+$att,}$docx"; else echo "::warning::No Word review note this run; sending without it."; fi
+          echo "attachments=$att" >> "$GITHUB_OUTPUT"
+          # Does the HTML body actually carry the article copy? The builder
+          # stamps the count. Without this the plain-text part claimed "the full
+          # text is in the HTML version" even when Chromium had died and the
+          # body held nothing but a PR link.
+          # What the HTML body actually ended up carrying. The builder stamps
+          # three numbers; the plain-text part is written from them rather than
+          # from an assumption, because it is a whole message on its own.
+          # grep -m1, not `grep | head`: under the default shell a broken
+          # pipeline is survivable, but adding `shell: bash` (which turns on
+          # pipefail) would make this step fail and take every step after it —
+          # including the send — with it. No pipe, no trap.
+          stamp=''
+          if [ -s "$html" ]; then stamp=$(grep -m1 -o '<!--ledger:[^>]*-->' "$html" || true); fi
+          num() { printf '%s' "$stamp" | sed -n "s/.*$1=\([0-9]*\).*/\1/p"; }
+          arts=$(num articles); skip=$(num skipped); full=$(num full)
+          arts=${arts:-0}; skip=${skip:-0}; full=${full:-0}
+          if [ "$arts" = "0" ]; then
+            cov='The drafts could not be rendered into this email — see the Actions log. Read them in the pull request above.'
+            echo "::warning::The email body carries no article text this run."
+          elif [ "$skip" != "0" ] || [ "$full" != "$arts" ]; then
+            cov="This email reproduces $full of $((arts + skip)) drafts in full; read the rest in the pull request above."
+            echo "::warning::Only $full of $((arts + skip)) drafts are reproduced in full."
+          else
+            cov='The full text of each draft is in the HTML version of this email.'
+          fi
+          echo "coverage=$cov" >> "$GITHUB_OUTPUT"
+          # THE SUBJECT COUNTS DRAFTS, like the body does. It was computed from
+          # the number of pull requests before any of them had been opened, so
+          # one pull request carrying two articles arrived as "1 Ledger draft"
+          # over a body reading "2 drafts ready for review". Integers only —
+          # nothing from a pull request title reaches this line. The single-draft
+          # subject still names the article, so it is left to the step that has
+          # the title; anything else is written here.
+          total=$((arts + skip))
+          if [ "$total" -ge 1 ] && ! { [ "$total" = "1" ] && [ "$FIND_COUNT" = "1" ]; }; then
+            if [ "$total" = "1" ]; then
+              echo "subject=Ready for review: 1 Ledger draft" >> "$GITHUB_OUTPUT"
+            else
+              echo "subject=$total Ledger drafts ready for review" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          echo "pdf=$([ -s "$pdf" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          echo "docx=$([ -s "$docx" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          [ -s "$html" ] || echo "::warning::No branded HTML body this run — the drafts could not be rendered. Falling back to plain text."
 
-      - name: Email the alert
-        if: steps.find.outputs.count != '0'
-        # Sender lives in the composite action, not here — see its header.
+      # The draft list was snapshotted before an npm install and a Chromium
+      # render — minutes ago. If Justin merged in that window the drafts are
+      # live, and an email insisting they are "not live yet" is worse than no
+      # email: ledger-published.yml has already said the opposite.
+      - name: Are the drafts still unmerged?
+        id: recheck
+        if: steps.gate.outputs.go == 'yes'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const drafts = JSON.parse(fs.readFileSync('${{ runner.temp }}/drafts.json', 'utf8'));
+            const states = await Promise.all(drafts.map(d =>
+              github.rest.pulls.get({ ...context.repo, pull_number: d.number })
+                .then(r => ({ number: d.number, state: r.data.state, merged: !!r.data.merged }))
+                // 'unknown' counts as open and unmerged: a GitHub hiccup must
+                // not eat the email.
+                .catch(() => ({ number: d.number, state: 'unknown', merged: false }))));
+            // MERGED is the only state that makes this email false. The body,
+            // the PDF and the Word note were all built from the snapshot taken
+            // before the render and say in as many words that these drafts are
+            // "not live yet" — which ledger-published.yml has just contradicted.
+            // Send nothing, and leave the record unwritten so the next run
+            // rebuilds from what is actually open.
+            const merged   = states.filter(s => s.merged);
+            const rejected = states.filter(s => s.state === 'closed' && !s.merged);
+            const live     = states.filter(s => s.state !== 'closed');
+            const list = xs => xs.map(s => '#' + s.number).join(', ');
+
+            // Send whenever anything is still open. Suppressing instead used to
+            // cost the surviving drafts their slot — and on the Monday floor
+            // there is no later trigger, so one well-timed merge took the whole
+            // week's review with it. What the email cannot do is stay silent
+            // about the change: the body, the PDF and the Word note were all
+            // written minutes ago and all still present these drafts as
+            // awaiting review. The correction goes in as a banner at the top of
+            // the reader's own view — see automation/ledger-email-notice.mjs.
+            core.setOutput('open', live.length ? 'yes' : 'no');
+            /* Every draft THIS EMAIL NAMES, which is the pre-render snapshot —
+               not the survivors. The plain-text part, the HTML body, the PDF and
+               the Word note were all built from that snapshot minutes ago, so a
+               draft closed inside the render window is still named in the
+               reader's inbox. Charging the attempt only to survivors let such a
+               draft be named for free: closed at 15:47 and reopened at 16:10, it
+               arrived in the 15:45 email having spent nothing, then bought two
+               more that same Monday. This file feeds the ATTEMPT count only;
+               `carried.json` decides what counts as delivered, and that one is
+               still the drafts whose text actually rendered. */
+            fs.writeFileSync('${{ runner.temp }}/emailed.json',
+                             JSON.stringify(drafts.map(d => String(d.number))));
+            /* The drafts that survived the render window. Only these can be
+               marked DELIVERED: a draft closed at 15:47 was still carried in
+               full by the 15:52 email, but under a banner telling the reviewer
+               in writing to ignore it. Marked delivered anyway, it was skipped
+               by every later trigger, so reopening it at 16:10 bought nothing —
+               the only copy the reviewer would get that week was the one they
+               had been told to disregard. */
+            fs.writeFileSync('${{ runner.temp }}/live.json',
+                             JSON.stringify(live.map(s => String(s.number))));
+
+            const parts = [];
+            if (merged.length) {
+              parts.push(`${list(merged)} ${merged.length === 1 ? 'was' : 'were'} merged and ` +
+                         `${merged.length === 1 ? 'is' : 'are'} publishing to jparkassociates.com now`);
+            }
+            if (rejected.length) {
+              parts.push(`${list(rejected)} ${rejected.length === 1 ? 'was' : 'were'} closed without merging`);
+            }
+            if (parts.length && live.length) {
+              /* THE SUBJECT IS LEFT ALONE. It used to be recomputed here from the
+                 survivors, which put it at odds with the body it introduces: the
+                 headline, the PDF and the Word note all count the pre-render
+                 snapshot and cannot be rebuilt, so a subject reading "1 Ledger
+                 draft" sat over a headline reading "3 drafts ready for review".
+                 Counting survivors also invented a draft when every one of them
+                 legitimately carried zero, naming an article that was not in the
+                 email at all. The banner below is the correction, and it says
+                 exactly which drafts still need review. */
+              core.setOutput('note',
+                `${parts.join('; ')} while this email was being prepared. The count above, the ` +
+                `attachments and the article text below were all built moments earlier, so ignore ` +
+                `${merged.length + rejected.length === 1 ? 'that one' : 'those'} — ` +
+                `${list(live)} ${live.length === 1 ? 'is' : 'are'} what still needs review.`);
+              core.warning(`${parts.join('; ')}; sending the review for ${list(live)} with a correction banner.`);
+            } else if (parts.length) {
+              core.notice(`${parts.join('; ')}. Nothing left to review, so no email.`);
+            }
+
+      # An HTML comment renders as nothing, so this is a no-op when there is
+      # nothing to correct. Never fatal: a correction that cannot be applied
+      # still rides in the plain-text part below.
+      - name: Add a late correction to the email, if anything changed
+        if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes' && steps.recheck.outputs.note != ''
+        continue-on-error: true
+        env:
+          EMAIL_HTML: ${{ steps.mail.outputs.html }}
+          NOTICE: ${{ steps.recheck.outputs.note }}
+        run: node automation/ledger-email-notice.mjs
+
+      - name: Email the weekly review
+        if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
+        # Sender and recipient live in the composite action, not here — see its header.
         uses: ./.github/actions/send-ledger-email
         with:
           smtp_user: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
           smtp_pass: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
-          subject: ${{ steps.find.outputs.subject }}
+          # The recheck's subject wins when a draft merged or closed mid-build.
+          # `mail` knows how many drafts the run actually found; `find` only ever
+          # knew how many pull requests there were, and names the single one.
+          # The recheck step deliberately sets no subject — see its note.
+          subject: ${{ steps.mail.outputs.subject || steps.find.outputs.subject }}
           html_file: ${{ steps.mail.outputs.html }}
-          attachments: ${{ steps.mail.outputs.pdf }}
-          # Plain-text alternative, always sent alongside the HTML part.
+          attachments: ${{ steps.mail.outputs.attachments }}
+          # Plain-text alternative, always sent alongside the HTML part. This is
+          # the whole message for a text-only client, so it stands on its own.
           body: |
-            A Ledger article is drafted but not yet live on jparkassociates.com.
-            Merging its pull request is what publishes it.
+            Ledger articles are ready for your review. Merging the pull request
+            is what publishes them to jparkassociates.com. A [Ledger] pull
+            request may also revise an article that is already live; the HTML
+            version and the PDF packet say which.
 
             ${{ steps.find.outputs.body }}
 
-            ${{ steps.mail.outputs.pdf != ''
+            ${{ steps.mail.outputs.coverage }}
+            ${{ steps.recheck.outputs.note }}
+            ${{ steps.mail.outputs.pdf == 'yes'
                 && 'Attached: ledger-drafts.pdf — each draft as it will read on the site, with reviewer notes after it.'
-                || 'The PDF review packet could not be built this run; see the Actions log. Review the pull request directly.' }}
+                || 'The PDF review packet could not be built this run; see the Actions log.' }}
+            ${{ steps.mail.outputs.docx == 'yes'
+                && 'Attached: Ledger-review-notes.docx — the reviewer notes in Word, ready to mark up.'
+                || 'The Word review note could not be built this run; see the Actions log.' }}
 
             —
-            Automated daily check (.github/workflows/ledger-draft-alert.yml).
-            You'll keep getting this once a day until the PR is merged or closed.
+            J Park & Associates · Certified Public Accountants
+            2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214 · (818) 248-1580
+
+            Automated weekly review (.github/workflows/ledger-draft-alert.yml),
+            sent after each Monday announcement scan. A draft left unmerged
+            appears again next Monday.
+
+      # Written AFTER the send, never before: a run that dies during the build
+      # must leave the record untouched so the next trigger can finish the job.
+      # Only a review that actually CARRIED the drafts counts as sent. If the
+      # builders failed and the email went out as a bare pull-request link, the
+      # record stays unwritten so the floor tries again — otherwise a transient
+      # npm failure at 15:45 would mark the week done and the reviewer would
+      # never see the articles at all. Two degraded alerts beat one degraded
+      # alert and no review; what stops that from looping is the attempt cap
+      # below, not the number of triggers — see the header.
+      # PER DRAFT, not per run. Gating the whole record on "did this email carry
+      # any article at all" locked out a draft whose own article failed to
+      # render whenever a sibling's succeeded: recorded as reviewed, delivered
+      # as a bare link, and shut out for the rest of the week. The builder
+      # writes the list of pull requests whose text actually reached the inbox,
+      # and only those are recorded.
+      # TWO THINGS ARE RECORDED, and the difference is the whole de-duplication.
+      #   done  — this draft's text reached the inbox. Never send it again this
+      #           week; there is nothing left to do for it.
+      #   tries — this draft was NAMED by an email, whether or not its text
+      #           rendered. At two, it stops being sent regardless of what
+      #           triggers this workflow next.
+      # The retry exists because a review that arrives without the article text
+      # is a degraded review: a transient npm or Chromium failure at 15:45 must
+      # not mark the week done and leave the reviewer with nothing to read. The
+      # CAP exists because the failure may not be transient, and because "there
+      # are only two triggers in a week" was never true — the announcement scan
+      # can be dispatched by hand and re-run after a failure, and every one of
+      # its completions fires this workflow.
+      # Written AFTER the send, never before: a run that records nothing is a
+      # run whose draft comes back on the next trigger.
+      - name: Record what went out
+        id: record
+        if: steps.gate.outputs.go == 'yes' && steps.recheck.outputs.open == 'yes'
+        continue-on-error: true       # the email is already away; a lost record costs a duplicate
+        run: |
+          mkdir -p '${{ runner.temp }}/ledger-sent'
+          node -e '
+            const fs = require("fs");
+            const read = (p, d) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return d; } };
+            let prev = read(process.argv[1], null);
+            if (Array.isArray(prev)) prev = { done: prev, tries: {} };
+            if (!prev || typeof prev !== "object") prev = { done: [], tries: {} };
+            const done  = new Set((Array.isArray(prev.done) ? prev.done : []).map(String));
+            const tries = (prev.tries && typeof prev.tries === "object") ? { ...prev.tries } : {};
+
+            // Every draft the email NAMED gets an attempt counted against it.
+            for (const n of read(process.argv[3], []).map(String)) tries[n] = Number(tries[n] || 0) + 1;
+            /* Finished = its text reached the reviewer AND the banner did not
+               tell them to ignore it. A draft closed or merged inside the
+               render window is in `carried` — it rendered fine — but the email
+               disowns it, so it is not a review anyone acted on. */
+            const live = new Set(read(process.argv[5], null) === null
+              ? read(process.argv[2], []).map(String)      // no recheck file: trust carried
+              : read(process.argv[5], []).map(String));
+            for (const n of read(process.argv[2], []).map(String)) {
+              if (!live.has(n)) continue;
+              done.add(n); delete tries[n];
+            }
+
+            fs.writeFileSync(process.argv[4], JSON.stringify({ done: [...done], tries }));
+            const open = Object.entries(tries).map(([n, t]) => `#${n} (attempt ${t})`);
+            console.log("Delivered this week:", [...done].map(n => "#" + n).join(", ") || "(none)");
+            if (open.length) console.log("Named but not delivered:", open.join(", "));
+          ' "$prev_json" "$carried_json" "$emailed_json" '${{ runner.temp }}/ledger-sent/sent.json' "$live_json"
+          echo "keep=yes" >> "$GITHUB_OUTPUT"
+        env:
+          prev_json: ${{ runner.temp }}/prev.json
+          carried_json: ${{ runner.temp }}/carried.json
+          emailed_json: ${{ runner.temp }}/emailed.json
+          live_json: ${{ runner.temp }}/live.json
+
+      # Cache entries are immutable, so each write takes a fresh key and the
+      # restore-keys prefix above picks up the most recent one for the week.
+      - name: Keep the record for the rest of the week
+        if: steps.record.outputs.keep == 'yes'
+        continue-on-error: true         # a lost record costs a duplicate, not the email
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/ledger-sent
+          key: ledger-review-${{ steps.week.outputs.id }}-${{ github.run_id }}-${{ github.run_attempt }}

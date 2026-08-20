@@ -1,7 +1,7 @@
 /* ============================================================================
    J PARK & ASSOCIATES — shared email chrome
    ----------------------------------------------------------------------------
-   One shell for every automated Ledger email, so the draft alert and the
+   One shell for every automated Ledger email, so the weekly review and the
    publish notice cannot drift apart. Matches emails/_template.html: cream
    ground, 640px table, navy masthead, gold letterspaced eyebrow, Georgia
    headings, Arial body.
@@ -64,7 +64,7 @@ export const panel = inner => `
 
 /** The cream, gold-ruled aside. `accent` lets a neutral state drop the gold. */
 export const callout = (label, inner, accent = C.GOLD_RULE) => `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
       <td class="e-callout" bgcolor="${C.CREAM}" style="background-color:${C.CREAM};border-left:4px solid ${accent};border-radius:10px;padding:20px 24px;">
         ${label ? `<p class="t-gold" style="margin:0 0 8px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2.5px;text-transform:uppercase;color:${C.GOLD_TEXT};">${esc(label)}</p>` : ''}
         ${inner}
@@ -75,7 +75,7 @@ export const callout = (label, inner, accent = C.GOLD_RULE) => `
  * Full email document.
  * @param {object} o
  * @param {string} o.preheader  inbox preview text
- * @param {string} o.eyebrow    e.g. "The Ledger · draft alert"
+ * @param {string} o.eyebrow    e.g. "The Ledger · weekly draft review"
  * @param {string} o.headline   masthead headline
  * @param {string} o.dateLine   date under the headline
  * @param {string} o.bodyHtml   markup for the white card
@@ -101,16 +101,37 @@ export function emailShell(o) {
     .e-item   { background-color: #22304c !important; border-color: #3d4d6e !important; }
     .e-callout{ background-color: #22304c !important; }
     .e-cta    { border: 1px solid #3d4d6e !important; }
+    /* A table header cell carried .t-strong (which flips to cream) and a cream
+       background that did not, so every rate-table header measured 1.00:1 —
+       cream on cream, invisible — in Apple Mail, iOS Mail and Gmail web dark. */
+    .e-th     { background-color: #2b3a5c !important; }
+    .e-cell   { border-color: #3d4d6e !important; }
     .t-title, .t-strong { color: ${C.CREAM} !important; }
     .t-body   { color: #cbd3e1 !important; }
     .t-muted, .t-foot { color: #9aa6bd !important; }
     .t-gold, .t-link  { color: ${C.GOLD_PILL} !important; }
+    /* A <mark> paints its own opaque gold ground, so the classes inside it must
+       NOT follow the page into dark: .t-strong flipping to cream over that gold
+       measured 1.19:1 and .t-link 1.00:1 — the highlighted words disappeared
+       entirely. Last, and !important, so it beats the flips above. */
+    mark, mark *,
+    mark .t-title, mark .t-strong, mark .t-body, mark .t-muted, mark .t-foot,
+    mark .t-gold, mark .t-link
+      { background-color: ${C.GOLD_PILL} !important; color: ${C.NAVY_900} !important; }
   }
 
   [data-ogsb] .e-page,    .e-page[data-ogsb]    { background-color: #0b1220 !important; }
   [data-ogsb] .e-card,    .e-card[data-ogsb]    { background-color: #16203a !important; }
   [data-ogsb] .e-item,    .e-item[data-ogsb]    { background-color: #22304c !important; border-color: #3d4d6e !important; }
   [data-ogsb] .e-callout, .e-callout[data-ogsb] { background-color: #22304c !important; }
+  [data-ogsb] .e-th,      .e-th[data-ogsb]      { background-color: #2b3a5c !important; }
+  [data-ogsb] .e-cell,    .e-cell[data-ogsb]    { border-color: #3d4d6e !important; }
+  [data-ogsb] mark, mark[data-ogsb], [data-ogsc] mark, mark[data-ogsc],
+  [data-ogsb] mark *, [data-ogsc] mark *,
+  [data-ogsb] mark .t-link, [data-ogsc] mark .t-link,
+  [data-ogsb] mark .t-strong, [data-ogsc] mark .t-strong,
+  [data-ogsb] mark .t-body, [data-ogsc] mark .t-body
+    { background-color: ${C.GOLD_PILL} !important; color: ${C.NAVY_900} !important; }
   [data-ogsb] .e-cta,     .e-cta[data-ogsb]     { border: 1px solid #3d4d6e !important; }
   [data-ogsc] .t-title,   .t-title[data-ogsc],
   [data-ogsc] .t-strong,  .t-strong[data-ogsc]  { color: ${C.CREAM} !important; }
@@ -122,7 +143,7 @@ export function emailShell(o) {
 </style>
 </head>
 <body class="e-page" bgcolor="${C.CREAM}" style="margin:0;padding:0;background-color:${C.CREAM};">
-<div style="display:none;font-size:0;line-height:0;max-height:0;opacity:0;overflow:hidden;mso-hide:all;">${esc(o.preheader)}${'&zwnj;&nbsp;'.repeat(40)}</div>
+<div style="display:none;font-size:0;line-height:0;max-height:0;opacity:0;overflow:hidden;mso-hide:all;"><span id="ledger-preheader">${esc(o.preheader)}</span>${'&zwnj;&nbsp;'.repeat(40)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="e-page" bgcolor="${C.CREAM}" style="background-color:${C.CREAM};">
 <tr><td align="center" style="padding:28px 12px;">
 <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:100%;">
@@ -162,6 +183,14 @@ export function emailShell(o) {
       J Park &amp; Associates &middot; Certified Public Accountants<br />
       2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214 &middot; (818) 248-1580
     </p>
+    <!-- The firm bio, verbatim from blog/_template.html and emails/_template.html.
+         The Ledger's own mail is the one place it was missing, so the weekly
+         review and the publish notice were the only J Park & Associates pages
+         whose footer did not say who the firm is. -->
+    <p class="t-foot" style="margin:0 0 6px;font:400 11px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">
+      A personalized CPA office on Foothill Blvd. in La Crescenta, keeping the books, taxes,
+      and payroll of Crescenta Valley and Los Angeles businesses in order for over 15 years.
+    </p>
     <p class="t-foot" style="margin:0;font:400 11px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">${o.footNote}</p>
   </td></tr>
 
@@ -169,4 +198,274 @@ export function emailShell(o) {
 </td></tr></table>
 </body>
 </html>`;
+}
+
+/* ============================================================================
+   ARTICLE BODY -> EMAIL HTML
+   ----------------------------------------------------------------------------
+   The weekly review email carries a full copy of each drafted article, not a
+   list of titles, so the article can be read and judged in the inbox without
+   opening GitHub or the PDF.
+
+   The article arrives as a normalized BLOCK LIST, not as site markup. The
+   blocks are produced from a real DOM in the browser (ledger-draft-pdf.mjs) and
+   carry only whitelisted inline HTML, so nothing from the article's stylesheet,
+   scripts or layout can leak into a mail client. Rendering lives here, next to
+   the rest of the chrome, so the email and the PDF share one palette.
+
+   Block kinds — see extractArticle() in ledger-draft-pdf.mjs:
+     {kind:'p', html}                     {kind:'h2'|'h3', text}
+     {kind:'list', ordered, items:[html]} {kind:'callout', label, blocks}
+     {kind:'action', heading, items}      {kind:'sources', label, items}
+     {kind:'disclaimer', html}
+   ========================================================================== */
+
+const BODY_FONT = "400 15px/1.7 Arial,Helvetica,sans-serif";
+const SERIF     = "Georgia,'Times New Roman',serif";
+
+/* Gmail clips a message past ~102 KB behind a "View entire message" link, and
+   it measures the message ON THE WIRE — quoted-printable encoding, headers,
+   MIME boundaries and the text/plain alternative all included. Measuring the
+   decoded HTML against 102 KB therefore passes messages that Gmail then clips:
+   a body that decodes to 103 KB composed to 112 KB on the wire, ~8 KB over.
+   QP inflation on this content measures ~7%; 1.15 leaves room for the headers
+   and the plain-text part on top of that. */
+export const GMAIL_CLIP_BYTES = 102 * 1024;
+const WIRE_OVERHEAD = 1.15;
+export const htmlBudget = () => Math.floor(GMAIL_CLIP_BYTES / WIRE_OVERHEAD);
+
+/* Items arrive flattened, each carrying its nesting depth. Nested <ul> inside
+   <li> is the markup mail clients disagree about most, so depth becomes an
+   indent on a flat list — same reading order, no client-specific collapse. */
+const listHtml = (items, ordered, start, type, reversed) => {
+  const norm = items.map(i => (typeof i === 'string' ? { html: i, depth: 0 } : i));
+  const tag = ordered ? 'ol' : 'ul';
+  // `start` carried through, or the packet prints 5,6,7 and the email 1,2,3.
+  // `!== 1`, not `> 1`: start="0" and negatives are real values the packet
+  // honours, and the two artifacts have to agree on what a step is called.
+  // start / type / reversed all carried: the packet honours them, and the two
+  // artifacts have to agree on what a step is called.
+  /* NO `start` and NO `reversed` on the element. Every top-level item carries
+     its own `value` from the extractor, which is the only way a list split
+     across a table stays in one sequence; leaving the count to the client gave
+     two steps the same number in one artifact and not the other. `type` stays,
+     because it is how the marker is DRAWN, not what it counts. */
+  const from = '';
+  const kind = ordered && /^[1aAiI]$/.test(String(type || '')) ? ` type="${type}"` : '';
+  const rev = '';
+  /* Sub-items are <li> here and nested <li> in the packet, so an <ol> holding
+     one counted it and the packet did not: "1. file 2.(sub) 3. pay" against
+     "1. file / sub / 2. pay". Every top-level step therefore states its own
+     number. Not for `reversed` — its base is the item count, which a list
+     split across blocks no longer knows; there the client's own count is
+     closer than a guess. */
+  // Fallback only: items from a path that did not number them.
+  let n = ordered ? (Number.isFinite(start) ? Number(start) : 1) : null;
+  /* `cont` is the REST of an item that a table or a figure interrupted. It is
+     the same step, so it gets no marker and consumes no number — otherwise the
+     PDF's "2." was the email's "3." from the first interrupted step onward. */
+  const marker = i => (i.cont ? 'list-style:none;'
+                             : i.depth ? `margin-left:${i.depth * 18}px;list-style-type:circle;` : '');
+  return `
+      <${tag}${from}${kind}${rev} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
+        ${norm.map(i => {
+          // An explicit value wins: a reversed list numbers its items in the
+          // extractor, because splitting one across a table let the client
+          // restart the countdown and print two steps both called one.
+          const v = Number.isFinite(i.value) ? i.value : (n !== null && !i.depth && !i.cont ? n++ : null);
+          return `<li${v !== null && !i.cont ? ` value="${v}"` : ''} style="margin:0 0 7px;${marker(i)}">${i.html}</li>`;
+        }).join('')}
+      </${tag}>`;
+};
+
+/** A real table, because a rate table flattened into a paragraph is unreadable
+    — "1120-SSep 15Sep 15" is not a deadline anyone can act on.
+    Cells arrive as {html, colspan, rowspan}: a merged header cell that loses
+    its span shifts every value in the row one column left, which is how a
+    California date ends up printed under "Form". */
+const tableHtml = (rows, dir = '') => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"${dir ? ` dir="${dir}"` : ''} style="margin:0 0 18px;border-collapse:collapse;">
+      ${rows.map(r => `<tr>${r.cells.map(cell => {
+        const c = typeof cell === 'string' ? { html: cell, colspan: 1, rowspan: 1 } : cell;
+        // Three kinds of cell, not two: a column heading (cream, bold), a row
+        // LABEL — a <th> in a row that also has data cells, which the browser
+        // bolds but does not fill — and a data cell.
+        const isTh = c.header ?? r.header;
+        const tag = isTh ? 'th' : 'td';
+        const span = `${c.colspan > 1 ? ` colspan="${c.colspan}"` : ''}${c.rowspan > 1 ? ` rowspan="${c.rowspan}"` : ''}`;
+        const style = r.header
+          ? `background-color:${C.CREAM};font:700 13px/1.5 Arial,Helvetica,sans-serif;color:${C.NAVY_900};`
+          : isTh
+            ? `font:700 13px/1.5 Arial,Helvetica,sans-serif;color:${C.NAVY_900};`
+            : `font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${C.SLATE};`;
+        // e-th / e-cell so the header's GROUND and the rule between cells move
+        // with the text when a client flips to dark. Without the first of them
+        // .t-strong turned the header text cream on a cream cell.
+        return `<${tag} class="e-cell ${r.header ? 't-strong e-th' : isTh ? 't-strong' : 't-body'}" align="left" valign="top"${span}` +
+               `${r.header ? ` bgcolor="${C.CREAM}"` : ''} style="${style}border:1px solid #e8e2d6;padding:8px 10px;">${c.html}</${tag}>`;
+      }).join('')}</tr>`).join('')}
+    </table>`;
+
+// `html` when the block carried markup — a citation link inside a code sample
+// is the whole reason a reviewer would look at one.
+const preHtml = (text, html) => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;"><tr>
+      <td class="e-callout" bgcolor="${C.CREAM}" style="background-color:${C.CREAM};border-radius:8px;padding:14px 16px;">
+        <pre class="t-body" style="margin:0;font:400 12px/1.55 Consolas,Menlo,monospace;color:${C.SLATE};white-space:pre-wrap;word-break:break-word;">${html || esc(text)}</pre>
+      </td>
+    </tr></table>`;
+
+/** The navy "do this before <date>" block. Checkmarks are cells, not bullets:
+    list-style images are stripped by Outlook and ::before never renders. */
+/* a/A/i/I markers, the way an <ol type> draws them. The panel writes its own
+   marker column, so a type the packet honoured came out as plain decimals here
+   — "step b" against "step 2" for the same line. */
+const ROMAN = [[1000,'m'],[900,'cm'],[500,'d'],[400,'cd'],[100,'c'],[90,'xc'],[50,'l'],
+               [40,'xl'],[10,'x'],[9,'ix'],[5,'v'],[4,'iv'],[1,'i']];
+const roman = n => { let o = ''; for (const [v, t] of ROMAN) while (n >= v) { o += t; n -= v; } return o; };
+const alpha = n => { let o = ''; while (n > 0) { const r = (n - 1) % 26; o = String.fromCharCode(97 + r) + o; n = (n - r - 1) / 26; } return o; };
+const listMarker = (n, type) => {
+  if (!Number.isFinite(n) || n < 1) return String(n);
+  // Chrome falls back to decimal outside the range roman numerals can express,
+  // so the packet printed 4000. where this printed MMMM.
+  if ((type === 'i' || type === 'I') && n > 3999) return String(n);
+  switch (type) {
+    case 'a': return alpha(n);
+    case 'A': return alpha(n).toUpperCase();
+    case 'i': return roman(n);
+    case 'I': return roman(n).toUpperCase();
+    default:  return String(n);
+  }
+};
+
+const actionHtml = (heading, items, lead = [], ordered = false, start = 1, reversed = false, type = '') => {
+  // An ORDERED checklist numbers its steps in the marker column instead of
+  // repeating the checkmark: the packet renders the <ol> markers, and a panel
+  // that dropped them left "fix step 4" pointing at nothing.
+  /* The extractor decides each item's marker, per source list. Counting here
+     could not: two lists written one after the other inside one panel share the
+     renderer, and a running counter numbered the unordered one too. */
+  let n = Number.isFinite(start) ? start : 1;
+  const marker = i => {
+    if (i && i.cont) return '';
+    if (i && i.marker !== undefined) return i.marker === '\u2713' ? '&#10003;' : esc(i.marker);
+    return ordered ? `${listMarker(reversed ? n-- : n++, type)}.` : '&#10003;';
+  };
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
+      <td class="e-cta" bgcolor="${C.NAVY_900}" style="background-color:${C.NAVY_900};border-radius:10px;padding:20px 24px;">
+        ${heading ? `<p style="margin:0 0 12px;font:700 15px/1.35 ${SERIF};color:${C.GOLD_PILL};">${esc(heading)}</p>` : ''}
+        ${lead.map(l => `<p style="margin:0 0 12px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};">${l}</p>`).join('')}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          ${items.map(i => `
+          <tr>
+            <td width="20" valign="top" style="font:700 14px/1.6 ${SERIF};color:${C.GOLD_PILL};">${marker(i)}</td>
+            <td style="font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};padding-bottom:7px;">${indent(i)}</td>
+          </tr>`).join('')}
+        </table>
+      </td>
+    </tr></table>`;
+};
+
+/* Indent a nested item rather than flattening it. listHtml was fixed to honour
+   depth and these two call sites were not, so a sub-step of an action item read
+   as its own action and a sub-source read as a sibling citation. */
+const indent = i => (typeof i === 'string' ? i : (i.depth
+  ? `<span style="padding-left:${i.depth * 16}px;display:inline-block;">&#8250; ${i.html}</span>`
+  : i.html));
+
+/* PER-ITEM MARKERS, when the extractor supplied them. A real <ol start> could
+   only carry a decimal starting point, so a sources box lost `type` and
+   `reversed` outright, a list split by a heavy block restarted at 1 twice, and
+   a box mixing an <ol> with a <ul> came out with no numbers at all. The panel
+   draws its own marker column for exactly this reason; the citation list now
+   does too, and falls back to a real list when there are no markers. */
+const sourcesHtml = (label, items, ordered = false, start = 1, reversed = false, type = '') => {
+  const marked = (items || []).some(i => i && i.marker !== undefined);
+  if (marked) return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
+      <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
+        ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+          ${items.map(i => `
+          <tr>
+            <td class="t-muted" width="22" valign="top" style="font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};padding-left:${(i && i.depth ? i.depth * 18 : 0)}px;">${
+              i && i.cont ? '' : i && i.marker !== undefined && i.marker !== '\u2713'
+                ? esc(i.marker)
+                : ''}</td>
+            <td class="t-muted" style="font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;padding-bottom:5px;">${i.html}</td>
+          </tr>`).join('')}
+        </table>
+      </td>
+    </tr></table>`;
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
+      <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
+        ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
+        <${ordered ? 'ol' : 'ul'}${ordered && Number.isFinite(start) && start !== 1 ? ` start="${Number(start)}"` : ''}${ordered && reversed ? ' reversed' : ''}${ordered && type ? ` type="${type}"` : ''} class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
+          ${items.map(i => `<li style="margin:0 0 5px;${i && i.cont ? 'list-style:none;' : ''}">${indent(i)}</li>`).join('')}
+        </${ordered ? 'ol' : 'ul'}>
+      </td>
+    </tr></table>`;
+};
+
+/** Render one block list. Unknown kinds are dropped rather than guessed at. */
+export function articleBlocksHtml(blocks) {
+  return (blocks || []).map(b => {
+    switch (b.kind) {
+      case 'p':
+        return `<p class="t-body" style="margin:0 0 15px;font:${BODY_FONT};color:${C.SLATE};">${b.html}</p>`;
+      // `html` when the extractor captured one: a heading may hold a link or
+      // inline code, and escaping its plain text threw both away.
+      case 'h2':
+        return `<h2 class="t-title" style="margin:26px 0 10px;font:700 19px/1.3 ${SERIF};color:${C.NAVY_900};">${b.html || esc(b.text)}</h2>`;
+      case 'h3':
+        return `<h3 class="t-title" style="margin:22px 0 8px;font:700 16px/1.35 ${SERIF};color:${C.NAVY_900};">${b.html || esc(b.text)}</h3>`;
+      case 'list':
+        return listHtml(b.items, b.ordered, b.start, b.type, b.reversed);
+      case 'table':
+        return tableHtml(b.rows, b.dir);
+      case 'pre':
+        return preHtml(b.text, b.html);
+      case 'callout':
+        return `<div style="margin:0 0 18px;">${callout(b.label || '', articleBlocksHtml(b.blocks))}</div>`;
+      case 'action':
+        return actionHtml(b.heading, b.items, b.lead, b.ordered, b.start, b.reversed, b.type);
+      case 'sources':
+        return sourcesHtml(b.label, b.items, b.ordered, b.start, b.reversed, b.type);
+      case 'disclaimer':
+        return `<p class="t-muted" style="margin:0 0 4px;font:italic 400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};">${b.html}</p>`;
+      default:
+        return '';
+    }
+  }).join('');
+}
+
+/**
+ * One drafted article, as a full-width card: navy hero band carrying the
+ * category, headline and byline, then the article itself.
+ * @param {object} a  {title, category, source, date, readTime, path, blocks}
+ * @param {object} o  {index, total, prNumber}
+ */
+export function draftArticleHtml(a, o = {}) {
+  const meta = [a.source, a.date, a.readTime].filter(Boolean).map(esc).join(' &middot; ');
+  // "Revision" when the pull request MODIFIES an article that is already live —
+  // the packet's own header says revision for the same article, and calling it a
+  // draft in the email tells the reviewer something false about the site.
+  const word = a.revised ? 'Revision' : 'Draft';
+  const seq  = o.total > 1 ? `${word} ${o.index} of ${o.total}` : word;
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;">
+      <tr><td bgcolor="${C.NAVY}" style="background-color:${C.NAVY};border-radius:10px 10px 0 0;padding:22px 24px 20px;">
+        <p style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2.5px;text-transform:uppercase;color:${C.GOLD_PILL};">
+          ${esc(seq)}${a.category ? ` &middot; ${esc(a.category)}` : ''}
+        </p>
+        <p style="margin:0;font:700 22px/1.28 ${SERIF};color:${C.CREAM};">${esc(a.title)}</p>
+        ${meta ? `<p style="margin:10px 0 0;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${C.GOLD_PILL};">${meta}</p>` : ''}
+        <p style="margin:8px 0 0;font:400 11px/1.5 Arial,Helvetica,sans-serif;color:${C.GOLD_PILL};">${esc(a.path || '')}</p>
+      </td></tr>
+      <tr><td class="e-item" bgcolor="${C.WHITE}" style="background-color:${C.WHITE};border:1px solid #e8e2d6;border-top:0;border-radius:0 0 10px 10px;padding:24px 24px 12px;">
+        ${articleBlocksHtml(a.blocks)}
+      </td></tr>
+    </table>`;
 }

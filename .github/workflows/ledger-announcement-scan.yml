@@ -10,8 +10,10 @@ name: Ledger announcement scan
 # criteria, voice, and PR conventions are in that file. Edit PIPELINE.md to
 # change what the agent does — you rarely need to touch this workflow.
 #
-# Companion workflow: ledger-draft-alert.yml emails Jason once a day for as long
-# as a drafted [Ledger] PR sits unmerged.
+# Companion workflow: ledger-draft-alert.yml runs when THIS workflow finishes and
+# emails Justin the week's drafts for review — the full article text in the body,
+# a PDF packet and a Word review note attached. It keys off this run completing,
+# so do not rename this workflow without updating the `workflows:` list there.
 #
 # ── One-time setup ─────────────────────────────────────────────────────────
 # 1. Install the Claude GitHub App on this repo: https://github.com/apps/claude
@@ -32,7 +34,10 @@ name: Ledger announcement scan
 
 on:
   schedule:
-    - cron: '0 15 * * 1'      # Mondays 15:00 UTC ≈ 08:00 America/Los_Angeles
+    # Mondays 15:00 UTC. Cron is UTC-only, so this is 08:00 Pacific in summer
+    # and 07:00 in winter — Monday morning either way, which is all that
+    # matters. Don't chase DST by editing this twice a year.
+    - cron: '0 15 * * 1'
   workflow_dispatch:          # run on demand from the Actions tab
 
 permissions:
