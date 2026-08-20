@@ -40,17 +40,31 @@ export function injectNotice(html, notice) {
         <p class="t-body" style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
           ${esc(notice.trim())}
         </p>`, C.GOLD_RULE);
-  return html.includes(NOTICE_MARKER)
-    ? html.replace(NOTICE_MARKER, banner)
+  let out = html.includes(NOTICE_MARKER)
+    ? html.replace(NOTICE_MARKER, () => banner)
     // No marker means an older or degraded body. Put it directly after the
     // opening body tag rather than dropping the correction on the floor.
-    : html.replace(/(<body[^>]*>)/i, `$1\n${banner}`);
+    : html.replace(/(<body[^>]*>)/i, (m) => `${m}\n${banner}`);
+
+  /* The inbox row is the part the reader sees FIRST, and it is the part a
+     correction inside the body cannot reach. The preheader is what Gmail shows
+     next to the subject, so it gets the same news — otherwise the preview still
+     reads "2 Ledger articles drafted and waiting" about a draft that is live. */
+  out = out.replace(/(<span id="ledger-preheader">)(.*?)(<\/span>)/s,
+                    (_, open, _old, close) => `${open}${esc(notice.trim())}${close}`);
+  return out;
 }
 
 async function main() {
   const path = process.env.EMAIL_HTML;
   const notice = process.env.NOTICE || '';
-  if (!path) throw new Error('EMAIL_HTML is required.');
+  // Empty rather than unset is the real case: the builder failed, so the
+  // workflow's `html=` output is blank. A stack trace helps nobody — the
+  // correction still rides in the plain-text part.
+  if (!path) {
+    console.log('::warning::No HTML body was built; the correction rides in the plain-text part only.');
+    return;
+  }
   if (!notice.trim()) { console.log('No late correction to add.'); return; }
 
   let html;

@@ -13,7 +13,6 @@ Enforced by .github/workflows/workflow-lint.yml on any change under .github/.
 """
 import glob
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -39,17 +38,49 @@ SHELLS_WE_CHECK = {'bash', 'sh', ''}
 FATAL_WARNINGS = ('here-document',)
 
 
+def strip_expressions(script):
+    """Replace every ${{ … }} with a bare word.
+
+    A non-greedy regex stops at the FIRST `}}`, which inside
+    `fromJSON('{"a":{"b":1}}')` is part of the JSON literal — leaving an
+    unbalanced quote and a false failure. Count braces instead.
+    """
+    out, i = [], 0
+    while i < len(script):
+        start = script.find('${{', i)
+        if start < 0:
+            out.append(script[i:])
+            break
+        out.append(script[i:start])
+        depth, j = 0, start + 1          # start at the first '{' of '${{'
+        while j < len(script):
+            if script[j] == '{':
+                depth += 1
+            elif script[j] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append('X')
+        i = j + 1 if j < len(script) else len(script)
+    return ''.join(out)
+
+
 def steps_of(doc):
-    """(job label, step) for every step in a workflow or a composite action."""
+    """(label, step, shell) for every step in a workflow or a composite action."""
+    top = (((doc.get('defaults') or {}).get('run')) or {}).get('shell', '')
     for name, job in (doc.get('jobs') or {}).items():
+        if not isinstance(job, dict):    # `job: null`, or a reusable-workflow stub
+            continue
         default = (((job.get('defaults') or {}).get('run')) or {}).get('shell', '')
-        top = (((doc.get('defaults') or {}).get('run')) or {}).get('shell', '')
         for i, step in enumerate(job.get('steps') or []):
-            yield f'{name}[{i}]', step, step.get('shell', default or top)
+            if isinstance(step, dict):
+                yield f'{name}[{i}]', step, step.get('shell', default or top)
     runs = doc.get('runs') or {}
-    if runs.get('using') == 'composite':
+    if isinstance(runs, dict) and runs.get('using') == 'composite':
         for i, step in enumerate(runs.get('steps') or []):
-            yield f'composite[{i}]', step, step.get('shell', '')
+            if isinstance(step, dict):
+                yield f'composite[{i}]', step, step.get('shell', '')
 
 
 def main():
@@ -75,16 +106,22 @@ def main():
             script = step.get('run')
             if not script:
                 continue
+            if not isinstance(script, str):
+                bad += 1
+                print(f'FAIL {rel} :: {where} :: `run:` is {type(script).__name__}, not a string')
+                continue
             # Parenthesised deliberately: written as a bare conditional
             # expression this binds as `X if shell else ('' not in SET)`, which
             # skips every step that explicitly says `shell: bash` — the ones
             # most worth checking.
-            name = (shell.split()[0] if shell else '')
+            # basename, so `shell: /bin/bash -e {0}` is still checked rather
+            # than silently skipped as an unknown shell.
+            name = os.path.basename(shell.split()[0]) if shell else ''
             if name not in SHELLS_WE_CHECK:
                 continue
             # GitHub substitutes ${{ }} before bash sees the script. Replace each
             # with a bare word so bash checks the shell, not the expression.
-            probe = re.sub(r'\$\{\{.*?\}\}', 'X', script, flags=re.S)
+            probe = strip_expressions(script)
             with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as tmp:
                 tmp.write(probe)
                 tmp_path = tmp.name

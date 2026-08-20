@@ -378,6 +378,12 @@ jobs:
               parts.push(`${list(rejected)} ${rejected.length === 1 ? 'was' : 'were'} closed without merging`);
             }
             if (parts.length && live.length) {
+              // The subject line is the other thing the reader sees before
+              // opening, and it was computed before any of this. A banner
+              // inside the body cannot reach it, so recompute it here.
+              core.setOutput('subject', live.length === 1
+                ? `Ready for review: 1 Ledger draft`
+                : `${live.length} Ledger drafts ready for review`);
               core.setOutput('note',
                 `${parts.join('; ')} while this email was being prepared. The count above, the ` +
                 `attachments and the article text below were all built moments earlier, so ignore ` +
@@ -406,7 +412,8 @@ jobs:
         with:
           smtp_user: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
           smtp_pass: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
-          subject: ${{ steps.find.outputs.subject }}
+          # The recheck's subject wins when a draft merged or closed mid-build.
+          subject: ${{ steps.recheck.outputs.subject || steps.find.outputs.subject }}
           html_file: ${{ steps.mail.outputs.html }}
           attachments: ${{ steps.mail.outputs.attachments }}
           # Plain-text alternative, always sent alongside the HTML part. This is

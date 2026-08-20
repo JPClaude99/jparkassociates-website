@@ -125,6 +125,20 @@ async function extractArticle(page, html) {
     const body = document.querySelector('.article-body .container-narrow');
     if (!body) return null;
 
+    /* The PACKET renders this HTML directly, so it is exactly as dangerous as a
+       reviewer note — and it was going in unfiltered while notes were being
+       escaped. One <style>body{display:none}</style> in a drafted article
+       produced a 9 KB PDF with nothing on any page but the footer: no cover, no
+       articles, no reviewer notes, and a `[ -s "$pdf" ]` check that passed, so
+       it was attached and described as "each draft laid out as it will read on
+       the site". The email was unaffected, which is the worst version — the two
+       artifacts disagreeing completely with nothing to flag it.
+       Articles are generated from blog/_template.html and never legitimately
+       carry any of these. */
+    for (const el of body.querySelectorAll('style, script, link, meta, base, iframe, object, embed')) {
+      el.remove();
+    }
+
     for (const el of body.querySelectorAll('a[href]')) {
       try { el.setAttribute('href', new URL(el.getAttribute('href'), base).href); } catch { /* leave as-is */ }
     }
@@ -147,24 +161,28 @@ async function extractArticle(page, html) {
     /* ---- article body -> normalized blocks, for the email --------------
        The email carries a full copy of the draft, so the article body has to
        cross from site markup into mail-client markup. Doing it here, against a
-       real DOM, means no regex ever parses HTML — and the block list that comes
-       out carries only whitelisted inline tags, so nothing from the site's
-       stylesheet or scripts can ride along into the inbox.
+       real DOM, means no regex ever parses HTML.
 
        THE RULE THIS WALKER EXISTS TO KEEP: the PDF renders the article's raw
        HTML, the email renders these blocks, and the two must describe the same
-       article. Anything this walker fails to handle is text that exists in the
-       packet and is silently gone from the inbox — so the default for anything
-       unrecognised is to KEEP it, never to skip it. Rendering of these blocks
-       lives in email-chrome.mjs. ---------------------------------------- */
+       article — nothing lost, nothing duplicated, nothing reordered. Anything
+       unrecognised is KEPT, never skipped. ------------------------------- */
     const escHtml = t => String(t).replace(/[&<>"]/g, c =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-    // Inline level: keep emphasis and links, unwrap everything else to text.
-    // `onNavy` is not decoration. The action list is a navy block, and the site
-    // says so itself — blog.css: `.action-list a { color: gold-300 }`. Emitting
-    // the light-ground navy regardless would paint every URL and every bolded
-    // figure #1B2A4A on a #1B2A4A ground: 1.00:1, gone.
+    const BLOCK = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'TABLE',
+                           'DL', 'PRE', 'BLOCKQUOTE', 'DIV', 'SECTION', 'ASIDE', 'FIGURE',
+                           'HR', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'FORM']);
+    // Blocks that become their own email block wherever they are found. Kept
+    // apart from BLOCK because a <div> is a wrapper to walk through, while a
+    // <table> is a thing to render.
+    const HEAVY = new Set(['TABLE', 'PRE', 'BLOCKQUOTE', 'DL', 'FIGURE']);
+    const text = el => (el ? el.textContent.trim() : '');
+
+    /* STRICTLY inline. Every block-level child is skipped, not descended into.
+       Descending was the original defect in two directions at once: it glued a
+       3x3 rate table into "1120-SSep 15Sep 15", and — once a fallback was added
+       to recover the block text — it emitted that text twice. */
     const inline = (node, onNavy) => {
       let out = '';
       const link   = onNavy ? P.GOLD_PILL : P.NAVY_900;
@@ -173,6 +191,7 @@ async function extractArticle(page, html) {
       for (const n of node.childNodes) {
         if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
         if (n.nodeType !== 1) continue;
+        if (BLOCK.has(n.tagName)) continue;
         switch (n.tagName) {
           case 'BR':     out += '<br />'; break;
           case 'A':      out += `<a class="t-link" href="${escHtml(n.getAttribute('href') || '')}" style="color:${link};text-decoration:underline;">${inline(n, onNavy)}</a>`; break;
@@ -185,75 +204,53 @@ async function extractArticle(page, html) {
           case 'SUB':    out += `<sub>${inline(n, onNavy)}</sub>`; break;
           case 'SCRIPT':
           case 'STYLE':  break;
-          // Block-level children are NOT inline content. Falling through to the
-          // default concatenated their text with no separators at all, turning
-          // a 3x3 rate table into "1120-SSep 15Sep 15". blocksOf() handles
-          // these; inline() must leave them alone.
-          case 'UL': case 'OL': case 'TABLE': case 'DL': case 'PRE':
-          case 'BLOCKQUOTE': case 'FIGURE': case 'HR': break;
           default:       out += inline(n, onNavy);   // span, and anything unexpected
         }
       }
       return out;
     };
 
-    const BLOCK = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'TABLE',
-                           'DL', 'PRE', 'BLOCKQUOTE', 'DIV', 'SECTION', 'ASIDE', 'FIGURE',
-                           'HR', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'FORM']);
-    const hasBlockChild = el => [...el.children].some(c => BLOCK.has(c.tagName));
-    const text = el => (el ? el.textContent.trim() : '');
-
-    /* Flatten a list, carrying nesting depth, and hand back any block content
-       found inside the items so the caller can place it rather than lose it.
-       A nested <ul> reached through a wrapper (<li><div><ul>) is still this
-       item's sublist — matching on the nearest <li> ancestor finds it, where
-       scanning direct children did not. */
-    const listItems = (list, onNavy, depth = 0) => {
-      const items = [], extra = [];
-      for (const li of list.children) {
-        if (li.tagName !== 'LI') continue;
-        items.push({ html: inline(li, onNavy), depth });
-        for (const sub of li.querySelectorAll('ul, ol')) {
-          if (sub.closest('li') !== li) continue;            // a deeper level's job
-          const nested = listItems(sub, onNavy, depth + 1);
-          items.push(...nested.items);
-          extra.push(...nested.extra);
-        }
-        // A table or code block inside a list item: keep it, after the list.
-        for (const b of li.querySelectorAll('table, pre, blockquote')) {
-          if (b.closest('li') === li) extra.push(b);
-        }
+    /* Inline, but descending THROUGH block wrappers with a separator, for the
+       two places that must end up as a single run of text: a table cell and a
+       list item. Keeps links and emphasis, which a textContent fallback loses. */
+    const flatten = (node, onNavy) => {
+      let out = '';
+      const add = t => { if (t && t.trim()) out += (out && !/\s$/.test(out) ? ' ' : '') + t; };
+      for (const n of node.childNodes) {
+        if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
+        if (n.nodeType !== 1) continue;
+        if (BLOCK.has(n.tagName)) add(flatten(n, onNavy));
+        else out += inline(n, onNavy);
       }
-      return { items, extra };
+      return out;
     };
 
-    /* EVERY list in the container, not just the first. `.action-list` and
-       `.sources-box` may hold more than one <ul>; querySelector kept only the
-       first, so a second block of source citations vanished from the email
-       while staying in the PDF. */
-    const items = (el, onNavy) => {
-      if (!el) return { items: [], extra: [] };
-      const all = { items: [], extra: [] };
-      for (const l of el.querySelectorAll('ul, ol')) {
-        if (l.closest('li')) continue;                       // nested; listItems has it
-        const r = listItems(l, onNavy);
-        all.items.push(...r.items);
-        all.extra.push(...r.extra);
+    /** Descendants of `root` matching `sel` that no NEARER container owns. */
+    const ownedBy = (root, sel, stops) => [...root.querySelectorAll(sel)].filter(el => {
+      for (let p = el.parentElement; p && p !== root; p = p.parentElement) {
+        if (stops(p)) return false;
       }
-      return all;
+      return true;
+    });
+
+    /** Clone `el` with exactly `nodes` removed — by identity, not by position. */
+    const withoutNodes = (el, nodes) => {
+      const MARK = 'data-ledger-drop';
+      nodes.forEach(n => n.setAttribute(MARK, '1'));
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll(`[${MARK}]`).forEach(n => n.remove());
+      nodes.forEach(n => n.removeAttribute(MARK));
+      return clone;
     };
+
+    const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
+      el.classList.contains('callout') || el.classList.contains('action-list') ||
+      el.classList.contains('sources-box');
 
     const cellsOf = tr => [...tr.children]
       .filter(c => c.tagName === 'TH' || c.tagName === 'TD')
       .map(c => ({
-        // inline() stops at block tags, so a cell holding a nested table or a
-        // list would come out empty. A grid inside a grid does not survive the
-        // trip into email markup intact, but its text must: append it flat
-        // rather than drop it. Never lose text is the rule here.
-        html: inline(c, false) + [...c.children]
-          .filter(n => BLOCK.has(n.tagName))
-          .map(n => (text(n) ? ` ${escHtml(text(n))}` : ''))
-          .join(''),
+        html: flatten(c, false),
         // Carried through, or a merged header cell shifts every value in the
         // row one column left and puts a California date under "Form".
         colspan: Math.max(1, parseInt(c.getAttribute('colspan') || '1', 10) || 1),
@@ -272,21 +269,20 @@ async function extractArticle(page, html) {
       const out = [];
       if (cap) out.push({ kind: 'h3', text: cap });
       if (rows.length) out.push({ kind: 'table', rows });
-      // A <table> with no rows still had text in it somewhere; never drop it.
-      else if (text(el)) out.push({ kind: 'p', html: inline(el, false) });
+      else if (text(el)) out.push({ kind: 'p', html: flatten(el, false) });
       return out;
     };
 
-    const dlBlock = (el) => {
+    const dlBlock = (el, onNavy) => {
       const list = [];
       let term = '';
-      const bold = t => `<strong class="t-strong" style="color:${P.NAVY_900};font-weight:700;">${t}</strong>`;
+      const bold = t => `<strong class="t-strong" style="color:${onNavy ? P.CREAM : P.NAVY_900};font-weight:700;">${t}</strong>`;
       for (const c of el.children) {
         if (c.tagName === 'DT') {
           if (term) list.push({ html: bold(term), depth: 0 });   // term with no definition
-          term = inline(c, false);
+          term = inline(c, onNavy);
         } else if (c.tagName === 'DD') {
-          list.push({ html: term ? `${bold(term)} &mdash; ${inline(c, false)}` : inline(c, false), depth: 0 });
+          list.push({ html: term ? `${bold(term)} &mdash; ${inline(c, onNavy)}` : inline(c, onNavy), depth: 0 });
           term = '';
         }
       }
@@ -294,12 +290,142 @@ async function extractArticle(page, html) {
       return list.length ? [{ kind: 'list', ordered: false, items: list }] : [];
     };
 
+    /* A list becomes a SEQUENCE of blocks, not a list plus a pile of leftovers.
+       Emitting an item's table after the whole list printed step 1's figures
+       below step 2. Each heavy block breaks the list where it actually sits. */
+    const listBlocks = (list, onNavy, depth = 0) => {
+      const out = [];
+      let run = [];
+      const flush = () => {
+        if (run.length) out.push({ kind: 'list', ordered: list.tagName === 'OL', items: run });
+        run = [];
+      };
+      for (const li of list.children) {
+        if (li.tagName !== 'LI') continue;
+        // The item's own text: everything except the lists and heavy blocks it
+        // contains, which are emitted in their own right below.
+        const clone = li.cloneNode(true);
+        clone.querySelectorAll('ul, ol, table, pre, blockquote, dl, figure').forEach(n => n.remove());
+        run.push({ html: flatten(clone, onNavy).trim(), depth });
+
+        // In document order, and never the same node twice: a <table> inside a
+        // <blockquote> inside this item belongs to the blockquote, and a nested
+        // <ul> inside that blockquote likewise.
+        const owned = ownedBy(li, 'ul, ol, table, pre, blockquote, dl, figure',
+                              p => p !== li && isContainer(p));
+        for (const node of owned) {
+          if (node.tagName === 'UL' || node.tagName === 'OL') {
+            for (const b of listBlocks(node, onNavy, depth + 1)) {
+              if (b.kind === 'list') run.push(...b.items);
+              else { flush(); out.push(b); }
+            }
+          } else {
+            flush();
+            out.push(...blocksOfNode(node, onNavy));
+          }
+        }
+      }
+      flush();
+      return out;
+    };
+
+    /** One element -> its email blocks. Split out so a list item, a table cell
+        and the body can all reach the same handling. */
+    const blocksOfNode = (el, onNavy) => {
+      const cls = el.classList;
+      switch (el.tagName) {
+        case 'P':
+          return text(el)
+            ? [cls.contains('disclaimer')
+                ? { kind: 'disclaimer', html: inline(el, onNavy) }
+                : { kind: 'p', html: inline(el, onNavy) }]
+            : [];
+        case 'H1': case 'H2': return [{ kind: 'h2', text: text(el) }];
+        case 'H3': case 'H4':
+        case 'H5': case 'H6': return [{ kind: 'h3', text: text(el) }];
+        case 'UL': case 'OL':  return listBlocks(el, onNavy);
+        case 'TABLE':          return tableBlock(el);
+        case 'DL':             return dlBlock(el, onNavy);
+        case 'PRE':            return text(el) ? [{ kind: 'pre', text: el.textContent.replace(/\s+$/, '') }] : [];
+        case 'HR':             return [];
+        case 'BLOCKQUOTE': {
+          const inner = blocksOf(el, onNavy);
+          if (inner.length) return [{ kind: 'callout', label: '', blocks: inner }];
+          // No inner blocks does not mean no content — a bare-text quote used
+          // to render as an empty cream box.
+          return text(el) ? [{ kind: 'callout', label: '', blocks: [{ kind: 'p', html: inline(el, onNavy) }] }] : [];
+        }
+        case 'FIGURE': {
+          // The raster is dropped on purpose; the caption is not. A figcaption
+          // routinely carries the only statement of what a chart shows.
+          const cap = el.querySelector('figcaption');
+          return text(cap) ? [{ kind: 'disclaimer', html: inline(cap, onNavy) }] : [];
+        }
+        default: {
+          if (cls.contains('callout')) {
+            // The label node itself, wherever it sits — and the SAME node is
+            // what gets removed. Reading `:scope > .label` while removing
+            // `.label` at any depth deleted a nested label without using it.
+            const label = el.querySelector('.label');
+            const clone = el.cloneNode(true);
+            const labels = [...clone.querySelectorAll('.label')];
+            if (label && labels.length) labels[0].remove();
+            const blocks = blocksOf(clone, onNavy);
+            return blocks.length ? [{ kind: 'callout', label: text(label), blocks }] : [];
+          }
+          if (cls.contains('action-list')) {
+            // Lists belonging to a NESTED callout or sources box are that box's,
+            // not this checklist's. Adopting them printed a source URL as an
+            // action step and left the nested box rendering as an empty navy bar.
+            const lists = ownedBy(el, 'ul, ol', p => isContainer(p));
+            const blocks = lists.flatMap(l => listBlocks(l, true, 0));
+            const items = blocks.flatMap(b => (b.kind === 'list' ? b.items : []));
+            const heavyInLists = blocks.filter(b => b.kind !== 'list');
+
+            // Everything that is not one of those lists, in document order.
+            // Marked before cloning and removed by mark: removing by INDEX
+            // assumed the clone's list order matched the owned subset, and a
+            // nested callout's <ul> shifts every index — so the checklist's own
+            // list survived (rendered twice) and the callout's was deleted.
+            const clone = withoutNodes(el, lists);
+            const heads = [...clone.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+            const heading = text(heads[0] || null);
+            if (heads[0]) heads[0].remove();
+            // On the navy ground for prose, on the light ground for anything
+            // that leaves the navy block — a callout computed for navy and then
+            // rendered on cream put #F5F0E8 text on an #F5F0E8 background.
+            const onNavyBlocks = blocksOf(clone, true);
+            const onLightBlocks = blocksOf(clone, false);
+            const lead = [];
+            const after = [];
+            onNavyBlocks.forEach((b, i) => {
+              if (b.kind === 'p' || b.kind === 'disclaimer') lead.push(b.html);
+              else if (b.kind === 'h2' || b.kind === 'h3') lead.push(`<strong>${escHtml(b.text)}</strong>`);
+              else after.push(onLightBlocks[i] || b);
+            });
+            return [{ kind: 'action', heading, lead, items }, ...heavyInLists, ...after];
+          }
+          if (cls.contains('sources-box')) {
+            const label = el.querySelector('.label');
+            const lists = ownedBy(el, 'ul, ol', p => isContainer(p) || p.classList.contains('label'));
+            const items = lists.flatMap(l => listBlocks(l, false, 0))
+                               .flatMap(b => (b.kind === 'list' ? b.items : []));
+            const clone = withoutNodes(el, lists);
+            const labels = [...clone.querySelectorAll('.label')];
+            if (label && labels.length) labels[0].remove();
+            return [{ kind: 'sources', label: text(label) || 'Sources', items }, ...blocksOf(clone, false)];
+          }
+          if ([...el.children].some(c => BLOCK.has(c.tagName))) return blocksOf(el, onNavy);
+          return text(el) ? [{ kind: 'p', html: inline(el, onNavy) }] : [];
+        }
+      }
+    };
+
     const blocksOf = (root, onNavy = false) => {
       const out = [];
       let buf = '';
       // Text sitting directly in a wrapper is content. Walking `children` and
-      // ignoring child TEXT NODES lost "<div>a sentence</div>" outright, and
-      // lost half of "<div>text <span>more</span></div>".
+      // ignoring child TEXT NODES lost "<div>a sentence</div>" outright.
       const flush = () => {
         if (buf.trim()) out.push({ kind: 'p', html: buf.trim() });
         buf = '';
@@ -307,95 +433,9 @@ async function extractArticle(page, html) {
       for (const node of root.childNodes) {
         if (node.nodeType === 3) { buf += escHtml(node.nodeValue); continue; }
         if (node.nodeType !== 1) continue;
-        const el = node;
-        if (!BLOCK.has(el.tagName)) { buf += inline(el, onNavy); continue; }
+        if (!BLOCK.has(node.tagName)) { buf += inline(node, onNavy); continue; }
         flush();
-        const cls = el.classList;
-        switch (el.tagName) {
-          case 'P':
-            if (text(el)) {
-              out.push(cls.contains('disclaimer')
-                ? { kind: 'disclaimer', html: inline(el, onNavy) }
-                : { kind: 'p', html: inline(el, onNavy) });
-            }
-            break;
-          case 'H1':
-          case 'H2': out.push({ kind: 'h2', text: text(el) }); break;
-          case 'H3': case 'H4': case 'H5':
-          case 'H6': out.push({ kind: 'h3', text: text(el) }); break;
-          case 'UL':
-          case 'OL': {
-            const r = listItems(el, onNavy);
-            if (r.items.length) out.push({ kind: 'list', ordered: el.tagName === 'OL', items: r.items });
-            for (const b of r.extra) out.push(...blocksOf({ childNodes: [b] }, onNavy));
-            break;
-          }
-          case 'TABLE': out.push(...tableBlock(el)); break;
-          case 'DL':    out.push(...dlBlock(el)); break;
-          case 'PRE':   if (text(el)) out.push({ kind: 'pre', text: el.textContent.replace(/\s+$/, '') }); break;
-          case 'BLOCKQUOTE': {
-            const inner = blocksOf(el, onNavy);
-            // No inner blocks does not mean no content — a bare-text quote used
-            // to render as an empty cream box.
-            if (inner.length) out.push({ kind: 'callout', label: '', blocks: inner });
-            else if (text(el)) out.push({ kind: 'callout', label: '', blocks: [{ kind: 'p', html: inline(el, onNavy) }] });
-            break;
-          }
-          case 'HR': break;
-          // The raster is dropped on purpose; the caption is not. A figcaption
-          // routinely carries the only statement of what a chart shows.
-          case 'FIGURE': {
-            const cap = el.querySelector('figcaption');
-            if (text(cap)) out.push({ kind: 'disclaimer', html: inline(cap, onNavy) });
-            break;
-          }
-          default: {
-            if (cls.contains('callout')) {
-              // :scope, not a descendant search. An unlabelled outer callout
-              // used to adopt a NESTED callout's label — and then delete it
-              // from the inner box.
-              const label = el.querySelector(':scope > .label');
-              const inner = el.cloneNode(true);
-              const stray = inner.querySelector(':scope > .label');
-              if (stray) stray.remove();
-              const blocks = blocksOf(inner, onNavy);
-              if (blocks.length) out.push({ kind: 'callout', label: text(label), blocks });
-            } else if (cls.contains('action-list')) {
-              const clone = el.cloneNode(true);
-              clone.querySelectorAll('ul, ol').forEach(n => n.remove());
-              const heads = [...clone.querySelectorAll('h2, h3, h4')];
-              const heading = text(heads.shift());
-              // Second and later headings become lead prose rather than being
-              // dropped — querySelector kept only the first, and the rest went
-              // missing from the email while staying in the packet.
-              const seconds = heads.map(text).filter(Boolean);
-              clone.querySelectorAll('h2, h3, h4').forEach(h => h.remove());
-              // Prose inside the block, wherever it sits — an action list that
-              // opens with a sentence, or carries a second heading, used to
-              // lose both. Anything that is not prose comes out after the
-              // block, on the light ground, rather than being dropped.
-              const rest = blocksOf(clone, true);
-              const lead = rest.filter(b => b.kind === 'p' || b.kind === 'disclaimer').map(b => b.html);
-              const after = rest.filter(b => b.kind !== 'p' && b.kind !== 'disclaimer');
-              const r = items(el, true);
-              out.push({ kind: 'action', heading, lead: [...seconds.map(escHtml), ...lead], items: r.items });
-              for (const b of after) out.push(b);
-              for (const b of r.extra) out.push(...blocksOf({ childNodes: [b] }, false));
-            } else if (cls.contains('sources-box')) {
-              const label = el.querySelector(':scope > .label');
-              const r = items(el, false);
-              out.push({ kind: 'sources', label: text(label) || 'Sources', items: r.items });
-              const clone = el.cloneNode(true);
-              clone.querySelectorAll('ul, ol, .label').forEach(n => n.remove());
-              for (const b of blocksOf(clone, false)) out.push(b);
-              for (const b of r.extra) out.push(...blocksOf({ childNodes: [b] }, false));
-            } else if (hasBlockChild(el)) {
-              out.push(...blocksOf(el, onNavy));       // wrapper: descend
-            } else if (text(el)) {
-              out.push({ kind: 'p', html: inline(el, onNavy) });   // wrapper holding only prose
-            }
-          }
-        }
+        out.push(...blocksOfNode(node, onNavy));
       }
       flush();
       return out;
@@ -536,7 +576,7 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity, printedPath
     ${prs.map(pr => prHeader(pr) + pr.articles.map((a, i) => {
       if (printed >= fullCount) { overflow.push(a); return ''; }
       printed++;
-      if (printedPaths) printedPaths.push(a.path);
+      if (printedPaths) printedPaths.push(`${pr.number}:${a.path}`);
       return draftArticleHtml(a, { index: i + 1, total: pr.articles.length, prNumber: pr.number });
     }).join('')).join('')}
     ${overflow.length ? callout('Not shown here', `
@@ -921,6 +961,7 @@ async function main() {
     const { size } = await fs.stat(OUT);
     console.log(`Wrote ${OUT} (${Math.round(size / 1024)} KB)`);
 
+    const hasPdfOnDisk = true;   // this line is only reached once the PDF is renamed into place
     const printedPaths = new Set(await writeEmail(rendered, true));
     if (process.env.EMAIL_HTML_OUT) console.log(`Wrote ${process.env.EMAIL_HTML_OUT}`);
 
@@ -930,17 +971,26 @@ async function main() {
        failed whenever a sibling's succeeded — recorded as reviewed, delivered
        as a bare link, shut out until the following Monday. */
     if (process.env.CARRIED_OUT) {
-      // EVERY article of a pull request has to have been printed in full before
-      // that pull request counts as reviewed. One demoted or unrendered article
-      // is a draft the reviewer has not read, and recording it shuts it out
-      // until the following Monday.
+      /* Which pull requests the reviewer has actually been given this week.
+         "Given" means in the body OR in the attached PDF, which carries every
+         rendered draft in full — that is what the PDF is for, and the body says
+         so when the size guard demotes a draft to a listed entry.
+
+         Two ways to get this wrong, and both were live:
+         - Keying on the bare path let one pull request's printed article
+           satisfy another's membership test when they touched the same slug.
+         - Requiring nothing be skipped meant a draft with one unrenderable
+           article was never recorded — and since the failure is deterministic,
+           every trigger rebuilt it and sent a byte-identical email, weekly,
+           forever. An article that cannot be rendered is a defect to fix, not
+           a thing to re-mail; the email names it and the Actions log warns. */
+      const key = (pr, a) => `${pr.number}:${a.path}`;
       const carried = rendered
         .filter(pr => pr.articles.length
-                   && !(pr.skipped || []).length
-                   && pr.articles.every(a => printedPaths.has(a.path)))
+                   && (hasPdfOnDisk || pr.articles.every(a => printedPaths.has(key(pr, a)))))
         .map(pr => String(pr.number));
       await fs.writeFile(process.env.CARRIED_OUT, JSON.stringify(carried));
-      console.log(`Carried in full: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);
+      console.log(`Delivered this week: ${carried.length ? carried.map(n => '#' + n).join(', ') : '(none)'}`);
     }
   } finally {
     await browser.close();

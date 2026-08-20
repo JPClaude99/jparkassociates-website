@@ -42,12 +42,17 @@ export function parseNotes(body) {
      inventing a draft that was never written. */
   const sections = [];
   let current = [];
+  // The fence's CHARACTER and its LENGTH. Storing only the character meant any
+  // ``` line closed a ```` block — and the real closing ```` then re-opened it,
+  // so every heading after that point stopped splitting. CommonMark (and the
+  // GitHub preview the author is looking at) requires the closer to be at least
+  // as long as the opener.
   let fence = null;
   for (const line of src.split('\n')) {
-    const f = line.match(/^\s*(```+|~~~+)/);
+    const f = line.match(/^\s*(`{3,}|~{3,})/);
     if (f) {
-      if (!fence) fence = f[1][0];
-      else if (line.trim().startsWith(fence)) fence = null;
+      if (!fence) fence = { char: f[1][0], len: f[1].length };
+      else if (f[1][0] === fence.char && f[1].length >= fence.len) fence = null;
     }
     if (!fence && /^##\s/.test(line) && current.length) {
       sections.push(current.join('\n'));

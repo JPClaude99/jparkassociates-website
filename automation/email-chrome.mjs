@@ -64,7 +64,7 @@ export const panel = inner => `
 
 /** The cream, gold-ruled aside. `accent` lets a neutral state drop the gold. */
 export const callout = (label, inner, accent = C.GOLD_RULE) => `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
       <td class="e-callout" bgcolor="${C.CREAM}" style="background-color:${C.CREAM};border-left:4px solid ${accent};border-radius:10px;padding:20px 24px;">
         ${label ? `<p class="t-gold" style="margin:0 0 8px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2.5px;text-transform:uppercase;color:${C.GOLD_TEXT};">${esc(label)}</p>` : ''}
         ${inner}
@@ -122,7 +122,7 @@ export function emailShell(o) {
 </style>
 </head>
 <body class="e-page" bgcolor="${C.CREAM}" style="margin:0;padding:0;background-color:${C.CREAM};">
-<div style="display:none;font-size:0;line-height:0;max-height:0;opacity:0;overflow:hidden;mso-hide:all;">${esc(o.preheader)}${'&zwnj;&nbsp;'.repeat(40)}</div>
+<div style="display:none;font-size:0;line-height:0;max-height:0;opacity:0;overflow:hidden;mso-hide:all;"><span id="ledger-preheader">${esc(o.preheader)}</span>${'&zwnj;&nbsp;'.repeat(40)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="e-page" bgcolor="${C.CREAM}" style="background-color:${C.CREAM};">
 <tr><td align="center" style="padding:28px 12px;">
 <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:100%;">

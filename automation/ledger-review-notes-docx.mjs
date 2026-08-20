@@ -150,10 +150,14 @@ function runs(md, base = {}) {
       // comment above has always claimed this; now it is true. Link text
       // cannot contain a bracket, so this cannot recurse more than once.
       const style = { ...base, color: NAVY_700, underline: { type: 'single', color: NAVY_700 } };
+      // CommonMark lets a destination be wrapped in angle brackets — the form
+      // the scan agent reaches for when a URL has a query string. Kept literal,
+      // the link target became "&lt;https://...&gt;" and was simply dead.
+      const url = g.url.replace(/^<(.*)>$/s, '$1');
       out.push(new ExternalHyperlink({
-        link: g.url,
+        link: url,
         children: g.text ? runs(g.text, style)
-                         : [new TextRun({ text: g.url, font: SANS, size: pt(10), ...style })],
+                         : [new TextRun({ text: url, font: SANS, size: pt(10), ...style })],
       }));
     }
   }
