@@ -1,0 +1,118 @@
+name: Ledger announcement scan
+
+# Weekly scan of IRS / CDTFA / FTB / EDD / FinCEN announcements. Drafts Ledger
+# articles and opens a PR for Justin to review. This is the CLOUD version of
+# what used to be a local Claude Code scheduled task on Jason's PC — it now runs
+# on GitHub's runners, so it fires whether or not that machine is on.
+#
+# The playbook lives in the repo at automation/PIPELINE.md. This workflow only
+# schedules the run and hands the agent the repo; all editorial rules, triage
+# criteria, voice, and PR conventions are in that file. Edit PIPELINE.md to
+# change what the agent does — you rarely need to touch this workflow.
+#
+# Companion workflow: ledger-draft-alert.yml emails Jason once a day for as long
+# as a drafted [Ledger] PR sits unmerged.
+#
+# ── One-time setup ─────────────────────────────────────────────────────────
+# 1. Install the Claude GitHub App on this repo: https://github.com/apps/claude
+# 2. Add ONE authentication secret under
+#    Settings → Secrets and variables → Actions → New repository secret:
+#      CLAUDE_CODE_OAUTH_TOKEN   generate locally with `claude setup-token`
+#                                (uses the Claude subscription — no API billing)
+#    To bill the Claude API instead, add ANTHROPIC_API_KEY and swap the
+#    claude_code_oauth_token line below for:
+#      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+# 3. Recommended: protect `main` (Settings → Branches) so nothing can push to it
+#    directly. The agent is instructed and permission-denied from doing so, but
+#    branch protection is the guarantee.
+#
+# If the secret is missing or expired the run FAILS, and GitHub emails the repo
+# admin about the failed run — so a silently-dead scanner is not a failure mode.
+# ───────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '0 15 * * 1'      # Mondays 15:00 UTC ≈ 08:00 America/Los_Angeles
+  workflow_dispatch:          # run on demand from the Actions tab
+
+permissions:
+  contents: write             # create the ledger/auto-* branch and commit
+  pull-requests: write        # open the [Ledger] PR
+  issues: read
+  id-token: write             # required for the action's GitHub App auth
+
+concurrency:
+  group: ledger-announcement-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # for `gh` calls in the playbook
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0      # playbook reads `git log`; branch off full history
+
+      - name: Identify commits as the Ledger bot
+        run: |
+          git config user.name  "Ledger Bot"
+          git config user.email "actions@github.com"
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are the weekly announcement scanner for The Ledger, the blog of
+            J Park & Associates (small-business CPA firm, La Crescenta / Los Angeles).
+
+            You are already running inside a checkout of the site repo
+            (JPClaude99/jparkassociates-website) on the `main` branch. The working
+            tree is clean. Do not clone anything.
+
+            Read `automation/PIPELINE.md` — it is your complete playbook — and follow
+            it end to end. If that file does not exist, STOP and report that; do
+            nothing else.
+
+            The playbook covers: dedupe against published posts and existing [Ledger]
+            PRs, scanning the sources in `automation/sources.json` (last ~10 days plus
+            the forward look-ahead), triage criteria, voice rules, rendering
+            `blog/_template.html` to `blog/<slug>.html`, prepending `blog/posts.js`,
+            the QA checklist, and PR conventions.
+
+            Hard constraints (repeat of the playbook, non-negotiable):
+            - NEVER commit to or push `main`. Work on a branch `ledger/auto-YYYY-MM-DD`
+              and open a PR titled "[Ledger] ...". The PR is the only output.
+            - At most 2 articles per run. If nothing announcement-worthy happened —
+              which is the normal outcome most weeks — open NO PR, make NO commits,
+              and end with a one-paragraph report of what you checked and why nothing
+              qualified, including the upcoming deadlines you are tracking.
+            - Every figure in an article must come from a page you actually fetched
+              this run. No numbers from memory.
+            - Use `gh` for all GitHub operations (`gh pr list`, `gh pr create`);
+              GH_TOKEN is already set in the environment.
+            - Today's date is whatever `date -u` reports on this runner. Use it —
+              do not assume a date.
+
+            Your final message is the run report and is read in the Actions log, so
+            make it self-contained: what you scanned, what you drafted (with the PR
+            link) or why you drafted nothing, and the dated items you are tracking
+            for future runs.
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 200
+            --allowedTools "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,TodoWrite"
+          settings: |
+            {
+              "permissions": {
+                "deny": [
+                  "Bash(git push origin main)",
+                  "Bash(git push origin HEAD:main)",
+                  "Bash(git push --force)",
+                  "Bash(git push -f)"
+                ]
+              }
+            }
