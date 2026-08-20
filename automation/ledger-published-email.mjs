@@ -91,20 +91,36 @@ async function isArticle(slug) {
       .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
       .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
       .replace(/<template\b[\s\S]*?<\/template>/gi, ' ');
-    const m = live.match(/(?:^|[\s"'\/])class\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi) || [];
+    /* Inside a TAG. A bare sentence — "Set class=\"article-body\" on the main
+       element" — is prose, and reading it as markup made a hub page an article
+       (and, when it was not in the manifest, a false orphan alarm). Attributes
+       are collected from `<... >` regions only. */
+    /* Quote-aware. `[^>]*` truncates a tag at the first `>` even inside a
+       quoted value, so `<main data-note="a>b" class="article-body">` failed the
+       test — which drops the slug before the orphan alarm can see it and leaves
+       a live article unmentioned by a green run. */
+    const tags = live.match(/<[a-zA-Z](?:"[^"]*"|'[^']*'|[^>"'])*>/g) || [];
+    const m = tags.flatMap(t =>
+      t.match(/(?:^|[\s"'\/])class\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi) || []);
     return m.some(a => {
       const v = a.replace(/^[^=]*=\s*/, '').replace(/^["']|["']$/g, '');
       return v.split(/\s+/).includes('article-body');
     });
   } catch {
-    /* UNREADABLE IS NOT "NOT AN ARTICLE". Returning false dropped the slug
-       before the orphan alarm below could see it, so an added blog/*.html that
-       the checkout does not have — a dispatch re-send after the base branch
-       moved on, or a merge race — was live, unannounced, and the run was green.
-       Treated as an article instead: the manifest then decides. In it, it is
-       announced; missing from it, the alarm fires and someone finds out. */
-    console.log(`::warning::blog/${slug}.html is not in the checkout; the manifest decides whether it is an article.`);
-    return true;
+    /* NOT IN THE CHECKOUT MEANS NOT LIVE, as far as anything here can tell.
+       Treating it as an article instead — "let the manifest decide" — was worse
+       in both directions: with a stale manifest entry the notice announced a
+       404 as live on a green run, and a merge reverted within the minute became
+       a red run claiming a file that does not exist is live. The checkout is
+       the base branch after the merge, which is what Pages serves, so a file
+       missing from it was not published by this pull request.
+       Loud, because a genuinely live article that this runner cannot see would
+       otherwise go unmentioned by a green run: the warning names the file. */
+    console.log(`::warning::blog/${slug}.html was added by this pull request but is not in the ` +
+                'checkout of the branch the site is served from, so it is not announced. ' +
+                'If it really is live, add it to blog/posts.js and re-send with the ' +
+                '"Ledger published" workflow_dispatch.');
+    return false;
   }
 }
 

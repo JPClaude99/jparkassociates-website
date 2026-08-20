@@ -449,7 +449,11 @@ export function articleBlocksHtml(blocks) {
  */
 export function draftArticleHtml(a, o = {}) {
   const meta = [a.source, a.date, a.readTime].filter(Boolean).map(esc).join(' &middot; ');
-  const seq  = o.total > 1 ? `Draft ${o.index} of ${o.total}` : 'Draft';
+  // "Revision" when the pull request MODIFIES an article that is already live —
+  // the packet's own header says revision for the same article, and calling it a
+  // draft in the email tells the reviewer something false about the site.
+  const word = a.revised ? 'Revision' : 'Draft';
+  const seq  = o.total > 1 ? `${word} ${o.index} of ${o.total}` : word;
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 26px;">
       <tr><td bgcolor="${C.NAVY}" style="background-color:${C.NAVY};border-radius:10px 10px 0 0;padding:22px 24px 20px;">

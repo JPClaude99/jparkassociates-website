@@ -1285,7 +1285,13 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity, printedPath
   // rendered — the Word note and the PDF cover count the same way, and three
   // artifacts from one run disagreeing about how many drafts there are is its
   // own kind of wrong answer.
-  const headline  = counted ? `${plural(all.length + skipped.length, 'draft')} ready for review.`
+  // "revision" when every one of them is a correction to a live article — the
+  // card labels and the PDF's own headers already say so, and a headline
+  // reading "2 drafts" over two cards reading "Revision 1 of 2" is the email
+  // disagreeing with itself.
+  const allRevised = all.length > 0 && all.every(a => a.revised) && !skipped.length;
+  const noun = allRevised ? 'revision' : 'draft';
+  const headline  = counted ? `${plural(all.length + skipped.length, noun)} ready for review.`
                             : 'Drafts ready for review.';
   // What this body will actually print in full, which is not always what was
   // drafted: the size guard demotes later drafts to a listed entry, and some
@@ -1296,27 +1302,36 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity, printedPath
   // Drafts that revise something already published. Saying "not yet live" of
   // one of those is false, and the reviewer reads the sentence as a fact.
   const revisedCount = all.filter(a => a.revised).length;
+  /* Said on EVERY branch, not only when everything fits. The size guard trims
+     the body, and the revision disclosure lived in the untrimmed branch alone,
+     so a week of corrections to live articles arrived described as drafts. */
+  const revisedClause = revisedCount
+    ? `; ${revisedCount === total
+        ? (total === 1 ? 'it is a revision' : 'they are revisions')
+        : `${revisedCount} of them ${revisedCount === 1 ? 'is a revision' : 'are revisions'}`} ` +
+      `of ${revisedCount === 1 ? 'an article' : 'articles'} already live`
+    : '';
   // The intro sentence has always been honest about that; the preheader — the
   // line Gmail shows in the inbox, before anything is opened — still promised
   // "the full text is below" for all twenty-one when seven fitted.
   const preheader = !counted
     ? 'Ledger drafts are written and waiting — merging publishes them.'
     : inFull >= total
-      ? `${plural(total, 'Ledger article')} drafted and waiting — the full text is below.`
-      : `${plural(total, 'Ledger article')} drafted and waiting — ${inFull} in full below, the rest in the PDF.`;
+      // "waiting on review", not "drafted": some of them may be corrections to
+      // articles that have been live for months.
+      ? `${plural(total, 'Ledger article')} waiting on review — the full text is below.`
+      : `${plural(total, 'Ledger article')} waiting on review — ${inFull} in full below, the rest in the PDF.`;
   const intro = !counted
     ? `${plural(prs.length, 'pull request')} waiting on your review.
        Merging is what publishes the articles inside to jparkassociates.com.`
     : inFull >= total
       ? `${total === 1 ? 'One article is' : `${total} articles are`} ready for your review.
          ${total === 1 ? 'It is' : 'They are'} reproduced in full below, exactly as ${total === 1 ? 'it' : 'they'} will read on
-         jparkassociates.com. Merging the pull request is what publishes ${total === 1 ? 'it' : 'them'}${revisedCount
-           ? `; ${revisedCount === total ? (total === 1 ? 'it is a revision' : 'they are revisions') : `${revisedCount} of them ${revisedCount === 1 ? 'is a revision' : 'are revisions'}`} of ${revisedCount === 1 ? 'an article' : 'articles'} already live`
-           : ''}.`
-      : `${total} articles are drafted and ready for your review. ${inFull === 1 ? 'One is' : `${inFull} are`}
+         jparkassociates.com. Merging the pull request is what publishes ${total === 1 ? 'it' : 'them'}${revisedClause}.`
+      : `${total} articles are ready for your review. ${inFull === 1 ? 'One is' : `${inFull} are`}
          reproduced in full below, exactly as ${inFull === 1 ? 'it' : 'they'} will read on jparkassociates.com;
          the rest ${skipped.length ? 'are named further down' : 'are in the attached PDF'}.
-         Merging the pull request is what publishes them.`;
+         Merging the pull request is what publishes them${revisedClause}.`;
 
   // What actually made it onto the message. Never promise an attachment that
   // failed to build — the reviewer would go looking for a file that isn't there.

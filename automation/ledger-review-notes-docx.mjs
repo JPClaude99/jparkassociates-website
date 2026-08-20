@@ -141,7 +141,17 @@ const decodeEntities = t => String(t).replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*
    partnership returns are due September 15, 2026" everywhere else. Best effort:
    a hiccup here costs the nicer title, never the note. */
 async function articleTitle(path, ref) {
-  if (!REPO || !process.env.GITHUB_TOKEN) return '';
+  return (await articleInfo(path, ref)).title;
+}
+
+/* Title AND whether the file is an article at all. The note counted every
+   blog/*.html in the pull request, so a hub page added beside a draft became
+   "2 drafts across 1 pull request" here against "1 article … and 1 more that
+   could not be rendered" on the packet cover — three artifacts from one run
+   disagreeing about the week. `isArticle` false leaves the file out entirely,
+   which is what the packet does. */
+async function articleInfo(path, ref) {
+  if (!REPO || !process.env.GITHUB_TOKEN) return { title: '', isArticle: true };
   try {
     const res = await fetch(
       `${API}/repos/${REPO}/contents/${encodeURI(path)}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`, {
@@ -152,12 +162,20 @@ async function articleTitle(path, ref) {
           'user-agent': 'ledger-review-notes',
         },
       });
-    if (!res.ok) return '';
+    if (!res.ok) return { title: '', isArticle: true };
     const html = await res.text();
+    // The same test the publish notice uses: the class token, inside a tag.
+    const tags = html.match(/<[a-zA-Z](?:"[^"]*"|'[^']*'|[^>"'])*>/g) || [];
+    const isArticle = tags.some(t =>
+      (t.match(/(?:^|[\s"'/])class\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi) || [])
+        .some(a => a.replace(/^[^=]*=\s*/, '').replace(/^["']|["']$/g, '')
+                    .split(/\s+/).includes('article-body')));
     const m = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-    if (!m) return '';
-    return xmlSafe(decodeEntities(m[1].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim());
-  } catch { return ''; }
+    const title = m
+      ? xmlSafe(decodeEntities(m[1].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim())
+      : '';
+    return { title, isArticle };
+  } catch { return { title: '', isArticle: true }; }
 }
 
 /* ---------- markdown -> Word --------------------------------------------- */
@@ -232,6 +250,9 @@ function runs(md, base = {}, depth = 0, inLink = false) {
     // [instructions]](https://…)" is ordinary GFM and used to print whole,
     // as text, with no link on it at all.
     '!\\[(?<alt>(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]\\((?<img>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
+    // <…> first: CommonMark allows spaces inside an angle-bracket destination,
+    // which is the form the scan agent reaches for when a URL has one.
+    '\\[(?<atext>(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]\\(\\s*<(?<aurl>[^<>]*)>(?:\\s+"[^"]*")?\\s*\\)',
     '\\[(?<text>(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]\\((?<url>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
     // A bare CommonMark autolink. The PDF renders it as a live link; the
     // Word note printed the angle brackets and no hyperlink at all.
@@ -241,11 +262,19 @@ function runs(md, base = {}, depth = 0, inLink = false) {
     '<(?<mail>[^\\s<>@]+@[^\\s<>@]+\\.[^\\s<>@]+)>',
     // GFM strikethrough. `marked` renders <del>; this printed the tildes.
     '~~(?<del>[^~]+)~~',
+    // One tilde is GFM strikethrough too; this printed the tildes.
+    '~(?<del1>[^~\\s][^~]*?)~(?!~)',
     /* A BARE url, which is how a source gets pasted into a pull-request body
        more often than not, and which the packet turns into a live link. The
        trailing-punctuation trim keeps a sentence's full stop out of the target.
        Last in the alternation so an explicit [text](url) still wins. */
     '(?<bare>https?://[^\\s<>()\\[\\]]+(?:\\([^\\s()]*\\)[^\\s<>()\\[\\]]*)*)',
+    /* GFM's extended autolinks, which is how a source actually gets pasted into
+       a pull-request body: a bare www. host and a bare email address. The packet
+       turns both into live links; this printed them as plain text, so the
+       reviewer lost the one route back to the source. */
+    '(?<![A-Za-z0-9.@/-])(?<www>www\\.[^\\s<>()\\[\\]]+(?:\\([^\\s()]*\\)[^\\s<>()\\[\\]]*)*)',
+    '(?<![A-Za-z0-9._%+-])(?<bmail>[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+)',
   ].join('|'), 'gs');
   let last = 0, m;
   const lit = t => { if (t) out.push(new TextRun({ text: unmaskEscapes(t), font: SANS, size: pt(10), color: SLATE, ...base })); };
@@ -263,8 +292,8 @@ function runs(md, base = {}, depth = 0, inLink = false) {
        to the source. Emphasis nested inside emphasis was flattened the same
        way. Every branch now recurses, with its own styling folded into `base`
        so the inner runs inherit it. */
-    if (g.del !== undefined) {
-      out.push(...runs(g.del, { ...base, strike: true }, depth + 1, inLink));
+    if (g.del !== undefined || g.del1 !== undefined) {
+      out.push(...runs(g.del ?? g.del1, { ...base, strike: true }, depth + 1, inLink));
     } else if (g.bi !== undefined) {
       out.push(...runs(g.bi, { ...base, bold: true, italics: true }, depth + 1, inLink));
     } else if (bold !== undefined) {
@@ -291,7 +320,13 @@ function runs(md, base = {}, depth = 0, inLink = false) {
          U+E000 (a dead link whose visible text read correctly), and an entity
          in an autolink or a bare URL opened a different address than the
          packet's link. */
-      const target = u => decodeEntities(unmaskEscapes(String(u || '').trim()));
+      /* xmlSafe LAST. decodeEntities turns "&#12;" back into a form feed, and
+         this string goes straight into a Target= attribute in
+         word/_rels/document.xml.rels, which nothing else sanitises — a valid
+         zip whose rels part is not well-formed XML, written with exit 0, is the
+         "Word found unreadable content" dialog. articleTitle() already ends
+         with xmlSafe for the same reason. */
+      const target = u => xmlSafe(decodeEntities(unmaskEscapes(String(u || '').trim())));
       const linkRun = text => new TextRun({
         text: unmaskEscapes(text), font: SANS, size: pt(10), ...base,
         color: NAVY_700, underline: { type: 'single', color: NAVY_700 },
@@ -314,9 +349,17 @@ function runs(md, base = {}, depth = 0, inLink = false) {
           : new ExternalHyperlink({ link: target(g.img), children: [linkRun(label)] }));
         continue;
       }
-      if (g.mail !== undefined) {
-        out.push(inLink ? linkRun(g.mail)
-          : new ExternalHyperlink({ link: `mailto:${target(g.mail)}`, children: [linkRun(g.mail)] }));
+      if (g.mail !== undefined || g.bmail !== undefined) {
+        const addr = g.mail ?? g.bmail;
+        out.push(inLink ? linkRun(addr)
+          : new ExternalHyperlink({ link: `mailto:${target(addr)}`, children: [linkRun(addr)] }));
+        continue;
+      }
+      if (g.www !== undefined) {
+        const m3 = g.www.match(/^(.*?)([.,;:!?]*)$/s);
+        out.push(inLink ? linkRun(m3[1])
+          : new ExternalHyperlink({ link: `https://${target(m3[1])}`, children: [linkRun(m3[1])] }));
+        if (m3[2]) lit(m3[2]);
         continue;
       }
       /* A HYPERLINK INSIDE A HYPERLINK IS NOT A THING WORD CAN OPEN. docx only
@@ -328,9 +371,12 @@ function runs(md, base = {}, depth = 0, inLink = false) {
          and its underline and stops being a relationship. */
       if (g.auto !== undefined) {
         // A bare autolink: the text and the target are the same string.
-        out.push(inLink ? linkRun(g.auto) : new ExternalHyperlink({
+        // Decoded for display too: the packet showed "&" where this showed
+        // "&amp;" in the very same URL.
+        const shown = decodeEntities(g.auto);
+        out.push(inLink ? linkRun(shown) : new ExternalHyperlink({
           link: target(g.auto),
-          children: [linkRun(g.auto)],
+          children: [linkRun(shown)],
         }));
         continue;
       }
@@ -345,9 +391,11 @@ function runs(md, base = {}, depth = 0, inLink = false) {
       // Entities in a destination are decoded, the way marked decodes them:
       // taken verbatim, "?a=1&amp;b=2" reached Word as "?a=1&amp;amp;b=2" and
       // opened a different address than the packet's link.
-      const url = target(g.url.replace(/^<(.*)>$/s, '$1'));
-      const kids = g.text ? runs(g.text, style, depth + 1, true)
-                          : [new TextRun({ text: unmaskEscapes(url || g.text || ''), font: SANS, size: pt(10), ...style })];
+      const rawText = g.text ?? g.atext;
+      // A space in a destination is percent-encoded, as marked encodes it.
+      const url = target((g.aurl ?? g.url ?? '').replace(/^<(.*)>$/s, '$1')).replace(/ /g, '%20');
+      const kids = rawText ? runs(rawText, style, depth + 1, true)
+                          : [new TextRun({ text: unmaskEscapes(url || rawText || ''), font: SANS, size: pt(10), ...style })];
       // An empty destination — [text](<>) — would become an external
       // relationship with Target="", a dead link Word may object to.
       if (!url || inLink) out.push(...kids);
@@ -402,9 +450,26 @@ const bullet = (md, ordered, level, instance = 0, n = null) => new Paragraph({
 /* Split on a pipe that is NOT escaped. Splitting on every pipe turned
    "| a \| b | fine |" into three cells against a two-column header, so the
    headings no longer labelled the data and a stray backslash was printed. */
-const splitRow = line => String(line).trim()
-  .replace(/^\|/, '').replace(/\|\s*$/, '')
-  .split(/(?<!\\)\|/);
+/* Split on an UNESCAPED pipe, counting backslashes: a doubled backslash is a
+   literal backslash and the pipe after it is a real boundary, which a simple
+   negative lookbehind got backwards — "| x\\|y | z |" came out as two cells
+   holding different data than the packet's, with a stray \| printed. */
+const splitRow = line => {
+  const t = String(line).trim();
+  const cells = [];
+  let cur = '', slash = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '\\') { slash++; cur += c; continue; }
+    if (c === '|' && slash % 2 === 0) { cells.push(cur); cur = ''; slash = 0; continue; }
+    slash = 0; cur += c;
+  }
+  cells.push(cur);
+  // A leading and a trailing pipe are the row's own delimiters, not cells.
+  if (cells.length && !cells[0].trim()) cells.shift();
+  if (cells.length && !cells[cells.length - 1].trim()) cells.pop();
+  return cells;
+};
 
 function mdTable(lines) {
   const cells = l => splitRow(l).map(c => c.trim());
@@ -454,6 +519,9 @@ const isDelimiterRow = (line, header) => {
    this printed both the use and the definition as literal text. Resolved into
    inline form before the block walk, which is the smallest change that makes
    the note and the packet agree. */
+const slot = i => `${ESC}\ue0ff${i}\ue0fe`;
+const SLOT_RE = new RegExp(`^${ESC}\\ue0ff(\\d+)\\ue0fe$`);
+
 const resolveRefs = md => {
   /* CODE IS NOT MARKDOWN. This ran over the whole body before the fence branch
      ever saw it, so a definition quoted inside a ``` block was deleted from the
@@ -471,16 +539,21 @@ const resolveRefs = md => {
     if (fence) {
       const m = t.match(/^(`{3,}|~{3,})\s*$/);
       if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
-      kept.push(line); out.push(ESC + '\ue0ff'); continue;
+      kept.push(line); out.push(slot(kept.length - 1)); continue;
     }
     const open = t.match(/^(`{3,}|~{3,})/);
-    if (open) { fence = open[1]; kept.push(line); out.push(ESC + '\ue0ff'); continue; }
+    if (open) { fence = open[1]; kept.push(line); out.push(slot(kept.length - 1)); continue; }
     // An indented code block: four spaces or a tab, and not a list continuation.
-    if (/^(?: {4}|\t)/.test(line) && line.trim()) { kept.push(line); out.push(ESC + '\ue0ff'); continue; }
+    if (/^(?: {4}|\t)/.test(line) && line.trim()) { kept.push(line); out.push(slot(kept.length - 1)); continue; }
     out.push(line);
   }
-  const restore = t => { let i = 0; return t.split('\n')
-    .map(l => (l === ESC + '\ue0ff' ? kept[i++] : l)).join('\n'); };
+  /* The placeholder carries its own INDEX. A flat marker was matched by any
+     body line equal to it, which consumed a restore slot that was never filled
+     and silently deleted a line. Indexed, a stray marker in the body restores
+     nothing and stays as itself. */
+  const restore = t => t.split('\n')
+    .map(l => { const m = l.match(SLOT_RE); return m && kept[+m[1]] !== undefined ? kept[+m[1]] : l; })
+    .join('\n');
 
   const defs = new Map();
   const body = out.join('\n').replace(
@@ -507,7 +580,7 @@ function mdBlocks(md) {
   let para = [];
   /* One counter per nesting level, so a sub-list under a hand-numbered list
      counts on its own instead of every item printing the parent's number. */
-  let inOl = false, olNums = [], olDelim = '';
+  let inOl = false, inList = false, olNums = [], olDelim = '';
 
   const flush = () => {
     if (!para.length) return;
@@ -529,6 +602,7 @@ function mdBlocks(md) {
        the run on those meant a list written "1. / 1. / 1." — the house style in
        automation/PIPELINE.md, and legal markdown that renders 1, 2, 3 —
        restarted at 1 in Word after every nested bullet. */
+    if (t && !/^\s/.test(line) && !/^([-*+]|\d+[.)])\s+/.test(line)) { inList = false; }
     if (t && !/^\s/.test(line) && !/^\d+[.)]\s+/.test(line)) { inOl = false; olNums = []; }
 
     // A fenced block is verbatim. Without this, `# comment` inside a code
@@ -570,9 +644,14 @@ function mdBlocks(md) {
     /* A 4-SPACE INDENTED CODE BLOCK. There was no branch for one, so its lines
        reached the paragraph buffer trimmed and were joined with a space: two
        shell commands became one line, and the URL in them was linkified. Only
-       when a paragraph is not already open — an indented line under a paragraph
-       is a lazy continuation, not code. */
-    if (!para.length && !inOl && /^(?: {4}|\t)/.test(line)) {
+       when a paragraph is not already open and no list is — an indented line
+       under a paragraph is a lazy continuation, and under a bullet it is the
+       rest of the bullet. Guarding on `inOl` alone turned the wrapped second
+       line of an ordinary "- **Confidence notes**: …" item — the shape
+       automation/PIPELINE.md itself uses — into a cream code block, detached
+       from the bullet it belongs to, and a 4-space-nested sub-bullet into a
+       literal "- nested" in Consolas. */
+    if (!para.length && !inList && /^(?: {4}|\t)/.test(line)) {
       const code = [];
       for (; i < lines.length; i++) {
         const l = lines[i];
@@ -647,6 +726,7 @@ function mdBlocks(md) {
         olDelim = delim;
       }
       if (!level) inOl = ordered;
+      inList = true;
       let n = null;
       if (ordered) {
         /* A LEVEL IS HAND-NUMBERED IF ITS OWN LIST DOES NOT START AT 1, or if
@@ -657,7 +737,12 @@ function mdBlocks(md) {
            ordinary "1." list printed 1. and 2., while the packet printed 5 and
            6: "check step 5" naming different steps in one email's two
            enclosures. */
-        if (olNums[level] === undefined || olNums[level] === null) {
+        /* `undefined` means NOT YET DECIDED; `null` means "Word numbers this
+           level". Treating them alike re-ran the decision on every item, so a
+           list written "1. / 5. / 6." printed 1, 5, 6 where marked — and so the
+           packet — prints 1, 2, 3: only the FIRST marker of a list decides
+           where it starts. */
+        if (!(level in olNums) || olNums[level] === undefined) {
           const own = parseInt(li[2], 10);
           const outerHand = olNums.slice(0, level).some(v => v !== null && v !== undefined);
           olNums[level] = (Number.isFinite(own) && own !== 1) || outerHand
@@ -669,7 +754,11 @@ function mdBlocks(md) {
       } else if (!level) {
         olNums = [];
       }
-      out.push(bullet(li[3], ordered, level, olInstance, n));
+      // GFM task list. The packet draws a checkbox; this printed a literal
+      // "[ ]" in front of the item.
+      const task = li[3].match(/^\[([ xX])\]\s+(.*)$/);
+      const body = task ? `${task[1] === ' ' ? '\u2610' : '\u2611'} ${task[2]}` : li[3];
+      out.push(bullet(body, ordered, level, olInstance, n));
       continue;
     }
 
@@ -718,7 +807,7 @@ function masthead(draftCount, prCount) {
     band([new TextRun({ text: 'J PARK & ASSOCIATES · THE LEDGER', font: SANS, bold: true,
                         size: pt(8), color: GOLD_PILL, characterSpacing: TRACK_8 })],
          { before: 240, after: 40 }),
-    // The only serif line in the document. This is the masthead — the role
+    // The masthead serif line; article titles use it too. This is the masthead — the role
     // Georgia plays in the email. Everything under it is working paper, and
     // ledger-draft-pdf.mjs is explicit that sans is what marks it as such.
     band([new TextRun({ text: 'Reviewer notes', font: SERIF, bold: true, size: pt(26), color: CREAM })],
@@ -814,7 +903,8 @@ async function main() {
 
     const rank = p => (order.has(p) ? order.get(p) : Number.MAX_SAFE_INTEGER);
     paths = [...paths].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-    draftCount += paths.length;
+    // Counted AFTER the article loop below drops the non-articles; counting
+    // here made the masthead say two drafts for a draft and a hub page.
 
     children.push(
       eyebrow(`Pull request #${pr.number} · open ${ageLabel(pr.created_at)}`),
@@ -838,11 +928,19 @@ async function main() {
       rule(NAVY_700, 8),
     );
 
+    const kept = [];
     for (const path of paths) {
-      const h1 = await articleTitle(path, pr.head && pr.head.sha);
-      children.push(...articleBlock(h1 || titles.get(path) || path.replace(/^blog\/|\.html$/g, ''),
+      const info = await articleInfo(path, pr.head && pr.head.sha);
+      if (!info.isArticle) {
+        console.log(`::warning::${path} in PR #${pr.number} is not an article page; not counted as a draft.`);
+        continue;
+      }
+      kept.push(path);
+      children.push(...articleBlock(info.title || titles.get(path) || path.replace(/^blog\/|\.html$/g, ''),
                                     path, byFile.get(path)));
     }
+    paths = kept;
+    draftCount += paths.length;
 
     // Notes that never bound to an article still belong in the document.
     const unbound = [...byFile.entries()].filter(([p]) => !paths.includes(p));

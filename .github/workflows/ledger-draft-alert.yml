@@ -101,7 +101,10 @@ on:
   workflow_run:
     workflows: ["Ledger announcement scan"]
     types: [completed]
-    branches: [main]
+    # No `branches:` filter — a trigger cannot read an expression, so naming the
+    # default branch here hard-codes it, and renaming the branch would silently
+    # stop the fast path firing while everything still looked healthy. The job
+    # guard below tests it against the repository's actual default branch.
   # Floor: Mondays 20:00 UTC — 13:00 Pacific in summer, 12:00 in winter. Hours
   # after the 15:00 UTC scan, so on a normal week the lock below has already
   # been taken and this run sends nothing. It exists for the weeks the scan
@@ -136,7 +139,8 @@ jobs:
     # before dying, and the lock stops the retry mailing twice.
     if: >
       github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion != 'cancelled' &&
+      (github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+       github.event.workflow_run.conclusion != 'cancelled' &&
        github.event.workflow_run.conclusion != 'skipped')
     runs-on: ubuntu-latest
 
@@ -489,10 +493,10 @@ jobs:
           smtp_user: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
           smtp_pass: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
           # The recheck's subject wins when a draft merged or closed mid-build.
-          # Most specific first: recheck knows what survived the render window,
-          # mail knows how many drafts the run actually found, find only ever
-          # knew how many pull requests there were.
-          subject: ${{ steps.recheck.outputs.subject || steps.mail.outputs.subject || steps.find.outputs.subject }}
+          # `mail` knows how many drafts the run actually found; `find` only ever
+          # knew how many pull requests there were, and names the single one.
+          # The recheck step deliberately sets no subject — see its note.
+          subject: ${{ steps.mail.outputs.subject || steps.find.outputs.subject }}
           html_file: ${{ steps.mail.outputs.html }}
           attachments: ${{ steps.mail.outputs.attachments }}
           # Plain-text alternative, always sent alongside the HTML part. This is

@@ -120,14 +120,17 @@ jobs:
         with:
           node-version: '24'
 
-      # continue-on-error, and the job is failed deliberately at the end instead.
+      # THE STEP ALWAYS EXITS 0; the job is failed deliberately further down.
       # The builder writes the notice for every article it CAN announce and then
-      # raises the orphan alarm; failing the step outright threw that notice
-      # away, so one unlisted article silenced the announcement of every article
-      # merged beside it.
+      # raises the orphan alarm, and the exit code has to be CAUGHT rather than
+      # allowed to propagate: GitHub runs a Linux `run:` under `bash -e`, so a
+      # non-zero `node` aborted the script on its first line and the
+      # $GITHUB_OUTPUT block below never ran — the notice was built, discarded,
+      # and never sent, which is exactly what catching the alarm was meant to
+      # prevent. `continue-on-error` does not help here: it changes the step's
+      # conclusion, not the shell's -e.
       - name: Build the publish notice
         id: build
-        continue-on-error: true
         if: steps.lock.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,7 +139,9 @@ jobs:
           EMAIL_TEXT_OUT: ${{ runner.temp }}/published.txt
           SUBJECT_OUT: ${{ runner.temp }}/subject.txt
         run: |
-          node automation/ledger-published-email.mjs
+          rc=0
+          node automation/ledger-published-email.mjs || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
           if [ -s "${{ runner.temp }}/published.html" ]; then
             echo "send=yes" >> "$GITHUB_OUTPUT"
             # A fixed "EOF" delimiter is a corrupt $GITHUB_OUTPUT waiting for the
@@ -150,6 +155,7 @@ jobs:
             echo "send=no" >> "$GITHUB_OUTPUT"
             echo "::notice::No articles published by this pull request; no email sent."
           fi
+          exit 0
 
       - name: Email the publish notice
         if: steps.build.outputs.send == 'yes'
@@ -165,7 +171,7 @@ jobs:
       # After the send, so the notice is away before the run goes red. GitHub
       # emails the repo admin about a failed run, and that is the alarm.
       - name: Fail if the builder raised the orphan alarm
-        if: steps.lock.outputs.cache-hit != 'true' && steps.build.outcome == 'failure'
+        if: steps.lock.outputs.cache-hit != 'true' && steps.build.outputs.rc != '0'
         run: |
           echo "::error::The publish notice builder failed — see its step above. An article may be live and missing from blog/posts.js."
           exit 1
