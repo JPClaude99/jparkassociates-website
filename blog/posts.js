@@ -20,6 +20,26 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "september-15-2026-s-corp-partnership-deadline",
+    title: "Extended S corp and partnership returns are due September 15, 2026",
+    excerpt: "September 15 is the last stop for extended Form 1120-S and 1065 returns. The federal late penalty is $255 per owner per month — and California gives partnerships and LLCs until October 15.",
+    date: "2026-08-20",
+    category: "deadlines",
+    source: "IRS / FTB",
+    srcShort: "Sep 15",
+    readMins: 5
+  },
+  {
+    slug: "overtime-w2-box-12-code-tt-2026",
+    title: "New on 2026 W-2s: overtime must be reported in box 12, code TT",
+    excerpt: "The IRS updated its overtime deduction FAQs on August 6. Employers must report qualified overtime separately for tax year 2026 — and California daily overtime and double time don't count.",
+    date: "2026-08-20",
+    category: "payroll",
+    source: "IRS",
+    srcShort: "IRS",
+    readMins: 5
+  },
+  {
     slug: "irs-automatic-penalty-relief-2026",
     title: "IRS penalty relief is now automatic — what the new AEP means for small businesses",
     excerpt: "The IRS is replacing First-Time Abate with a new Automatic Exemption from Penalty (AEP). Relief for late filing, late payment, and missed payroll deposits now applies on its own — if your last three years are clean.",
