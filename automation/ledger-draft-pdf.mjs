@@ -321,6 +321,9 @@ async function extractArticle(page, html) {
         // which rebuilds tags without attributes, did not: the same sentence
         // printed the date 2026-09-15 in one artifact and 51-90-6202 in the other.
         case 'BDO':    return `<bdo dir="${escHtml(n.getAttribute('dir') || 'ltr')}">${inline(n, onNavy)}</bdo>`;
+        // <bdi> isolates its contents from the surrounding direction; the
+        // default branch dropped the element and with it the isolation.
+        case 'BDI':    return `<bdi>${inline(n, onNavy)}</bdi>`;
         case 'SCRIPT':
         case 'STYLE':  return '';
         default:       return inline(n, onNavy);   // span, and anything unexpected
@@ -365,7 +368,17 @@ async function extractArticle(page, html) {
          separator before it, and marks that the text after it needs one too. */
       let afterBlock = false;
       const gap = t => out && !/\s$/.test(out) && t && !/^\s/.test(t);
-      for (const n of node.childNodes) {
+      /* A nested table never reaches tableBlock(), which is where the row
+         groups get put into render order, so flattening it in source order put
+         a <tfoot> total above the rows it sums and a trailing <caption> after
+         them. Same order here as there. */
+      const kids = node.tagName === 'TABLE'
+        ? [...node.querySelectorAll(':scope > caption'),
+           ...node.querySelectorAll(':scope > thead'),
+           ...node.querySelectorAll(':scope > tr, :scope > tbody'),
+           ...node.querySelectorAll(':scope > tfoot')]
+        : node.childNodes;
+      for (const n of kids) {
         if (n.nodeType === 3) {
           const t = escHtml(n.nodeValue);
           if (afterBlock && gap(t)) out += ' ';
@@ -377,7 +390,10 @@ async function extractArticle(page, html) {
         const isA = n.tagName === 'A' && n.querySelector && n.querySelector(BLOCK_SEL);
         const isBlock = isA || BLOCK.has(n.tagName) || (n.querySelector && n.querySelector(BLOCK_SEL));
         if (isBlock) {
-          const inner = isA ? anchorWrap(n, flatten(n, onNavy), onNavy) : flatten(n, onNavy);
+          const emph = EMPH_WRAP[n.tagName];
+          const inner = isA ? anchorWrap(n, flatten(n, onNavy), onNavy)
+                     : emph ? emph(flatten(n, onNavy))
+                     : flatten(n, onNavy);
           if (inner.trim()) {
             if (gap(inner)) out += ' ';
             out += inner;
@@ -455,21 +471,33 @@ async function extractArticle(page, html) {
         html = flatten(el, onNavy);
         probe.innerHTML = html;
       }
-      return { kind, text: plain, html: norm(probe.textContent) === norm(plain) ? html : '' };
+      return { kind, text: plain,
+               html: norm(probe.textContent) === norm(plain) ? withDir(el, html) : '' };
     };
-    const CONTAINER_CLASS = ['callout', 'action-list', 'sources-box'];
-    /* A container's OWN label, never one belonging to a box nested inside it.
-       A plain querySelector('.label') took the first one anywhere below, so an
-       unlabelled callout wrapping a labelled one was headed with the INNER
-       box's label — an assertion about text it does not describe — and the
-       inner box lost its own. For a sources box it was worse: the parts walk
-       descended into the nested element because it "contained the label", and
-       the nested panel was dismantled into a bare paragraph. */
-    const ownLabel = el => ownedBy(el, '.label',
-      p => CONTAINER_CLASS.some(c => p.classList.contains(c)))[0] || null;
-    const OWNED_SEL = 'ul, ol, table, pre, blockquote, dl, figure, .callout, .action-list, .sources-box';
-    const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
-      CONTAINER_CLASS.some(c => el.classList.contains(c));
+    /* Marker helpers, matching email-chrome.mjs's listMarker — the panel decides
+       each item's marker here so the renderer never has to count, which is what
+       let two adjacent lists share one sequence. */
+    const CHECK = '\u2713';
+    const ROMAN9 = [[1000,'m'],[900,'cm'],[500,'d'],[400,'cd'],[100,'c'],[90,'xc'],[50,'l'],
+                    [40,'xl'],[10,'x'],[9,'ix'],[5,'v'],[4,'iv'],[1,'i']];
+    const romanOf = n => { let o = ''; for (const [v, t] of ROMAN9) while (n >= v) { o += t; n -= v; } return o; };
+    const alphaOf = n => { let o = ''; while (n > 0) { const r = (n - 1) % 26; o = String.fromCharCode(97 + r) + o; n = (n - r - 1) / 26; } return o; };
+    const listMark = (n, type) => {
+      if (!Number.isFinite(n) || n < 1) return String(n);
+      switch (type) {
+        case 'a': return alphaOf(n);
+        case 'A': return alphaOf(n).toUpperCase();
+        case 'i': return romanOf(n);
+        case 'I': return romanOf(n).toUpperCase();
+        default:  return String(n);
+      }
+    };
+    // The first numeric marker in a segment, for the <ol start> the sources box
+    // renders. Non-decimal types keep their own per-item markers instead.
+    const firstNum = items => {
+      const m = items.find(i => !i.depth && !i.cont && i.marker && /^\d+\.$/.test(i.marker));
+      return m ? parseInt(m.marker, 10) : undefined;
+    };
 
     /* `dir` on a BLOCK — a cell, a paragraph — the way KEEP_ATTR gives it to the
        packet. inlineNode carries it for inline elements; without this the same
@@ -484,6 +512,41 @@ async function extractArticle(page, html) {
       return d ? `<span dir="${d}">${html}</span>` : html;
     };
 
+    const EMPH_WRAP = {
+      DEL:    h => `<s style="text-decoration:line-through;">${h}</s>`,
+      S:      h => `<s style="text-decoration:line-through;">${h}</s>`,
+      STRIKE: h => `<s style="text-decoration:line-through;">${h}</s>`,
+      INS:    h => `<u style="text-decoration:underline;">${h}</u>`,
+      U:      h => `<u style="text-decoration:underline;">${h}</u>`,
+      MARK:   h => `<mark style="background-color:${P.GOLD_PILL};color:${P.NAVY_900};padding:0 2px;">${h}</mark>`,
+    };
+
+    /* One block, wrapped. A paragraph carries its markup in `html`; a list
+       carries it per item, and wrapping only `html` left a highlighted <ul>
+       looking like an ordinary one. */
+    const wrapBlock = (b, wrap) => {
+      if (typeof b.html === 'string' && b.html) return { ...b, html: wrap(b.html) };
+      if (Array.isArray(b.items)) {
+        return { ...b, items: b.items.map(i => (i && typeof i.html === 'string' && i.html
+          ? { ...i, html: wrap(i.html) } : i)) };
+      }
+      return b;
+    };
+
+    const CONTAINER_CLASS = ['callout', 'action-list', 'sources-box'];
+    /* A container's OWN label, never one belonging to a box nested inside it.
+       A plain querySelector('.label') took the first one anywhere below, so an
+       unlabelled callout wrapping a labelled one was headed with the INNER
+       box's label — an assertion about text it does not describe — and the
+       inner box lost its own. For a sources box it was worse: the parts walk
+       descended into the nested element because it "contained the label", and
+       the nested panel was dismantled into a bare paragraph. */
+    const ownLabel = el => ownedBy(el, '.label',
+      p => CONTAINER_CLASS.some(c => p.classList.contains(c)))[0] || null;
+    const OWNED_SEL = 'ul, ol, table, pre, blockquote, dl, figure, .callout, .action-list, .sources-box';
+    const isContainer = el => el.tagName === 'LI' || HEAVY.has(el.tagName) ||
+      CONTAINER_CLASS.some(c => el.classList.contains(c));
+
     const cellsOf = tr => [...tr.children]
       .filter(c => c.tagName === 'TH' || c.tagName === 'TD')
       .map(c => ({
@@ -494,7 +557,19 @@ async function extractArticle(page, html) {
         // Carried through, or a merged header cell shifts every value in the
         // row one column left and puts a California date under "Form".
         colspan: Math.max(1, parseInt(c.getAttribute('colspan') || '1', 10) || 1),
-        rowspan: Math.max(1, parseInt(c.getAttribute('rowspan') || '1', 10) || 1),
+        /* CLAMPED to the cell's own row group. The browser stops a rowspan at
+           the end of its <tbody>; the email's table has no row groups left, so
+           a rowspan that reached from the last body row into the <tfoot> pushed
+           every footer value one column right — a total printed under the wrong
+           heading. */
+        rowspan: (() => {
+          const want = Math.max(1, parseInt(c.getAttribute('rowspan') || '1', 10) || 1);
+          const group = c.closest('thead, tbody, tfoot') || c.closest('table');
+          if (!group) return want;
+          const rows = [...group.querySelectorAll(':scope > tr')];
+          const at = rows.indexOf(c.closest('tr'));
+          return at < 0 ? want : Math.max(1, Math.min(want, rows.length - at));
+        })(),
       }));
 
     const tableBlock = (el) => {
@@ -553,14 +628,15 @@ async function extractArticle(page, html) {
       for (const c of groups) {
         if (c.tagName === 'DT') {
           if (term) list.push({ html: bold(term), depth: 0 });   // term with no definition
-          term = flatten(c, onNavy);
+          term = withDir(c, flatten(c, onNavy));
         } else if (c.tagName === 'DD') {
           if (heavy(c)) {
             if (term) list.push({ html: bold(term), depth: 0 });
             flushList();
             out.push(...blocksOf(c, onNavy));
           } else {
-            list.push({ html: term ? `${bold(term)} &mdash; ${flatten(c, onNavy)}` : flatten(c, onNavy), depth: 0 });
+            list.push({ html: term ? `${bold(term)} &mdash; ${withDir(c, flatten(c, onNavy))}`
+                                     : withDir(c, flatten(c, onNavy)), depth: 0 });
           }
           term = '';
         }
@@ -632,7 +708,7 @@ async function extractArticle(page, html) {
 
         // An <li> whose only content is a table used to emit a blank bullet.
         if (!owned.length) {
-          const html = flatten(li, onNavy).trim();
+          const html = withDir(li, flatten(li, onNavy).trim());
           if (html) run.push({ html, depth });
           continue;
         }
@@ -788,7 +864,7 @@ async function extractArticle(page, html) {
                blocks that interrupt them, rather than one panel plus a pile of
                blocks below it. */
             const panelSeq = [];
-            let panelOrdered = false, panelStart = 1, panelReversed = false, panelType = '';
+            let panelHasOrdered = false, panelHasUnordered = false;
             let phase = 0;
             let heading = '';
             const pair = (nav, lite) => ({ nav, lite });
@@ -820,24 +896,25 @@ async function extractArticle(page, html) {
                 // so an <ol start="3"> inside one printed 3. 4. 5. in the packet
                 // and no numbers at all in the email — "fix step 4" then meant
                 // nothing in one of the two artifacts.
-                const firstList = navSeq.find(b => b.kind === 'list');
-                if (firstList && firstList.ordered) {
-                  panelOrdered = true;
-                  panelStart = Number.isFinite(firstList.start) ? firstList.start : 1;
-                  // reversed and type as well. The packet honours both — its
-                  // list-style:decimal reset cancels neither — so an
-                  // <ol reversed> printed 3. 2. 1. there and 1. 2. 3. here, and
-                  // "do step 1 first" named a different step in each artifact.
-                  panelReversed = !!firstList.reversed;
-                  panelType = firstList.type || '';
-                  /* A reversed list with no start counts DOWN from its own
-                     length — that is what the browser draws in the packet, and
-                     defaulting to 1 made the email print 1. 0. -1. */
-                  if (panelReversed && !Number.isFinite(firstList.start)) {
-                    panelStart = navSeq.reduce((n, b) => n + (b.kind === 'list'
-                      ? b.items.filter(i => !i.depth && !i.cont).length : 0), 0) || 1;
-                  }
+                /* EACH SOURCE LIST NUMBERS ITSELF. A panel-wide flag merged a
+                   <ul> and an <ol> written one after the other into a single
+                   numbered checklist, so the packet showed "checkmark Pull /
+                   checkmark Check / 1. File / 2. Pay" and the email showed
+                   "1. Pull / 2. Check / 3. File / 4. Pay" — "fix step 1" named
+                   a different step in each artifact. The marker is decided here,
+                   per list, and the renderer just prints it. */
+                for (const b of navSeq) {
+                  if (b.kind !== 'list') continue;
+                  const tops = b.items.filter(i => !i.depth && !i.cont);
+                  if (!b.ordered) { tops.forEach(i => { i.marker = CHECK; }); continue; }
+                  panelHasOrdered = true;
+                  // A reversed list with no start counts DOWN from its own
+                  // length, which is what the browser draws in the packet.
+                  let n = Number.isFinite(b.start) ? b.start
+                        : b.reversed ? (tops.length || 1) : 1;
+                  for (const i of tops) { i.marker = `${listMark(n, b.type)}.`; n += b.reversed ? -1 : 1; }
                 }
+                if (navSeq.some(b => b.kind === 'list' && !b.ordered)) panelHasUnordered = true;
                 // An EMPTY <ul> is not the checklist. Letting it advance the
                 // phase demoted the real list below it to plain bullets and
                 // left an empty navy bar where the panel should have been.
@@ -949,23 +1026,25 @@ async function extractArticle(page, html) {
             }
             /* Heading, lead and label belong to the FIRST chunk only — repeating
                them over a split panel would read as two separate checklists. */
-            let first = true, numbered = 0;
+            let first = true;
             const panel = items.length
               ? panelSeq.flatMap((seg) => {
                   if (seg.block) return [seg.block];
                   if (!seg.items.length) return [];
                   const head = first;
                   first = false;
-                  const from = panelOrdered
-                    ? (panelReversed ? panelStart - numbered : panelStart + numbered)
-                    : undefined;
-                  numbered += seg.items.filter(i => !i.depth && !i.cont).length;
-                  const numbering = { ordered: panelOrdered, start: from,
-                                      reversed: panelReversed, type: panelType };
+                  /* The sources box renders a real <ol>/<ul> rather than a
+                     marker column, so it can only be one or the other: ordered
+                     only when EVERY list in the panel was, or the unordered
+                     citations would come out numbered. Items carry their own
+                     markers either way, which is what the action panel uses. */
+                  const srcOrdered = panelHasOrdered && !panelHasUnordered;
                   return [isAction
                     ? { kind: 'action', heading: head ? heading : '', lead: head ? lead : [],
-                        items: seg.items, ...numbering }
-                    : { kind: 'sources', label: head ? srcLabel : '', items: seg.items, ...numbering }];
+                        items: seg.items }
+                    : { kind: 'sources', label: head ? srcLabel : '', items: seg.items,
+                        ordered: srcOrdered,
+                        start: srcOrdered ? firstNum(seg.items) : undefined }];
                 })
               : [
                   ...(isAction && heading ? [{ kind: 'h3', text: heading, html: '' }] : []),
@@ -975,6 +1054,17 @@ async function extractArticle(page, html) {
                   ...(allLead ? before.map(x => x.lite) : []),
                 ];
             return [...leadOut, ...panel, ...after.map(x => x.lite)];
+          }
+          /* BLOCK-LEVEL EMPHASIS. <del>, <ins>, <mark>, <u>, <s> may legally wrap
+             whole paragraphs; the descent below throws the wrapper away and
+             keeps only its children, so the PDF struck out "The rate is 800 per
+             quarter." and the email printed it as ordinary prose — a superseded
+             figure reading as a current one, which is exactly what the inline
+             <del> case exists to prevent. The wrapper is re-applied to each
+             block the descent produces. */
+          if (EMPH_WRAP[el.tagName] && el.querySelector(BLOCK_SEL)) {
+            const wrap = EMPH_WRAP[el.tagName];
+            return blocksOf(el, onNavy).map(b => wrapBlock(b, wrap));
           }
           // querySelector, not a direct-children check: <div><a><p>…</p></a></div>
           // is valid HTML5 and used to emit an empty <a> where a paragraph was.
@@ -1023,7 +1113,14 @@ async function extractArticle(page, html) {
             if (wrapped.trim()) out.push({ kind: 'p', html: wrapped });
           } else if (node.querySelector && node.querySelector(BLOCK_SEL)) {
             flush();
-            out.push(...blocksOf(node, onNavy));
+            /* This is where a block-wrapping <del>/<ins>/<mark>/<u>/<s> is
+               descended into — blocksOfNode is never reached for a non-BLOCK
+               wrapper — so the wrapper has to be re-applied here or the PDF
+               strikes out a superseded rate and the email prints it as current
+               prose. */
+            const wrap = EMPH_WRAP[node.tagName];
+            const inner = blocksOf(node, onNavy);
+            out.push(...(wrap ? inner.map(b => wrapBlock(b, wrap)) : inner));
           } else {
             buf += inlineNode(node, onNavy);
           }
@@ -1286,6 +1383,13 @@ function buildHtml(prs, generatedOn) {
       Merging a pull request is what publishes its articles to jparkassociates.com.
       Reviewer notes follow each draft on a cream ground &mdash; those are working notes, not article copy.
     </p>
+    <!-- The firm bio, verbatim from blog/_template.html. Every other Ledger
+         artifact carries it in its footer; a running page footer has no room for
+         it, so the packet's colophon is the cover. -->
+    <p class="cover-bio">
+      A personalized CPA office on Foothill Blvd. in La Crescenta, keeping the books, taxes,
+      and payroll of Crescenta Valley and Los Angeles businesses in order for over 15 years.
+    </p>
   </section>`;
 
   const drafts = prs.map(pr => pr.articles.map((a, i) => `
@@ -1367,6 +1471,8 @@ function buildHtml(prs, generatedOn) {
   .draft-meta { margin-top:4mm; font-size:9pt; color:rgba(245,240,232,.62); }
 
   .draft-body { padding:10mm 14mm 4mm; max-width:170mm; }
+  .cover-bio { margin-top:8mm; padding-top:4mm; border-top:.5pt solid rgba(245,240,232,.28);
+               font-size:8pt; line-height:1.5; color:rgba(245,240,232,.8); max-width:120mm; }
   .draft-body p { margin-bottom:1.3em; }
   /* NOTHING RUNS OFF THE PAGE. <pre> defaults to white-space:pre, so a long
      command in a code sample laid out to 1277px on an 816px page and 64 of its
@@ -1423,7 +1529,11 @@ function buildHtml(prs, generatedOn) {
      above was written for unordered lists only, so an ol in a panel printed
      "1. checkmark step" — two markers for one step — while the email, whose
      panel renders a fixed checkmark column, printed no number at all. */
-  .draft-body .action-list ol { list-style:decimal; margin:0 0 0 5mm; }
+  /* NO list-style here. An <ol> is decimal by default, and naming it explicitly
+     overrode the element's own type attribute — so an <ol type="a"> in a panel
+     printed 25. 26. 27. in the PDF against y. z. aa. in the email. The reset
+     above it is scoped to <ul>, so nothing needs cancelling. */
+  .draft-body .action-list ol { margin:0 0 0 5mm; }
   .draft-body .action-list ol > li { padding-left:0; }
   .draft-body .action-list ol > li::before { content:none; }
 
@@ -1477,6 +1587,29 @@ function buildHtml(prs, generatedOn) {
   .draft-body .action-list .callout .label { color:var(--gold-text); }
   .draft-body .action-list .sources-box .label { color:var(--grey-500); }
 
+  /* A PANEL INSIDE A WHITE BOX INSIDE A PANEL. The box's reset to dark type is
+     more specific than the outer panel's catch-all, so it reached on into the
+     nested panel — which paints its own navy ground — and printed navy on navy
+     at 1.00:1. Written after the box resets, so the innermost ground wins. */
+  .draft-body .callout .action-list,
+  .draft-body .callout .action-list *,
+  .draft-body .sources-box .action-list,
+  .draft-body .sources-box .action-list * { color:rgba(245,240,232,.9); }
+  .draft-body .callout .action-list h1, .draft-body .callout .action-list h2,
+  .draft-body .callout .action-list h3, .draft-body .callout .action-list h4,
+  .draft-body .sources-box .action-list h1, .draft-body .sources-box .action-list h2,
+  .draft-body .sources-box .action-list h3, .draft-body .sources-box .action-list h4
+    { color:var(--gold-300); }
+  .draft-body .callout .action-list .label,
+  .draft-body .sources-box .action-list .label { color:var(--gold-300); }
+  .draft-body .callout .action-list .disclaimer,
+  .draft-body .sources-box .action-list .disclaimer { color:rgba(245,240,232,.75); }
+  /* …and a white box inside THAT goes back to dark type. */
+  .draft-body .callout .action-list .callout,
+  .draft-body .callout .action-list .callout *,
+  .draft-body .callout .action-list .sources-box,
+  .draft-body .callout .action-list .sources-box * { color:var(--slate-600); }
+
   /* A HIGHLIGHT WINS OVER EVERY GROUND RULE ABOVE IT. Written earlier, the
      panel's own two-class catch-all outranked it and painted cream over the
      gold at 1.06:1; a link inside a highlight measured 1.00:1, gold on gold. */
@@ -1519,6 +1652,11 @@ function buildHtml(prs, generatedOn) {
   .notes table { border-collapse:collapse; width:100%; font-size:8.5pt; margin:0 0 1em; }
   .notes th, .notes td { border:.5pt solid rgba(27,42,74,.22); padding:1.6mm 2mm; text-align:left; vertical-align:top; }
   .notes th { background:rgba(27,42,74,.07); font-weight:600; color:var(--navy-900); }
+  /* The wrap rules are scoped to .draft-body, and the notes are not in it: a
+     fenced code block in a pull-request body ran 148px past the page edge and
+     roughly 25 characters of it were never printed. */
+  .notes pre, .notes code { white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
+  .notes { overflow-wrap:break-word; }
   .notes-empty { color:var(--grey-500); font-style:italic; }
   .notes-run { break-before:page; border-left-color:var(--gold-500); border-top-color:var(--gold-500); }
   .notes-run .notes-label { color:var(--navy-900); }

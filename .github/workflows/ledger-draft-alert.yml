@@ -420,12 +420,18 @@ jobs:
             // awaiting review. The correction goes in as a banner at the top of
             // the reader's own view — see automation/ledger-email-notice.mjs.
             core.setOutput('open', live.length ? 'yes' : 'no');
-            /* Exactly the drafts this email is about. The Monday floor records
-               these rather than the ones whose text rendered — see the note on
-               the record step. Written here, not in `find`, so a draft merged
-               or closed in the render window is not recorded as reviewed. */
+            /* Every draft THIS EMAIL NAMES, which is the pre-render snapshot —
+               not the survivors. The plain-text part, the HTML body, the PDF and
+               the Word note were all built from that snapshot minutes ago, so a
+               draft closed inside the render window is still named in the
+               reader's inbox. Charging the attempt only to survivors let such a
+               draft be named for free: closed at 15:47 and reopened at 16:10, it
+               arrived in the 15:45 email having spent nothing, then bought two
+               more that same Monday. This file feeds the ATTEMPT count only;
+               `carried.json` decides what counts as delivered, and that one is
+               still the drafts whose text actually rendered. */
             fs.writeFileSync('${{ runner.temp }}/emailed.json',
-                             JSON.stringify(live.map(s => String(s.number))));
+                             JSON.stringify(drafts.map(d => String(d.number))));
 
             const parts = [];
             if (merged.length) {
@@ -436,30 +442,15 @@ jobs:
               parts.push(`${list(rejected)} ${rejected.length === 1 ? 'was' : 'were'} closed without merging`);
             }
             if (parts.length && live.length) {
-              // The subject line is the other thing the reader sees before
-              // opening, and it was computed before any of this. A banner
-              // inside the body cannot reach it, so recompute it here.
-              // Drafts, not pull requests — the same count the body prints.
-              // Missing or unreadable counts fall back to one draft per pull
-              // request, which is the shape of every run the scanner produces.
-              let counts = {};
-              try { counts = JSON.parse(fs.readFileSync('${{ runner.temp }}/counts.json', 'utf8')); }
-              catch { /* the builder did not get that far */ }
-              /* A pull request can legitimately carry ZERO drafts — one that
-                 touched only automation, or added a hub page under blog/. With
-                 every survivor at zero the total is zero, and the subject read
-                 "0 Ledger drafts ready for review" over a body headline reading
-                 "1 draft ready for review". Count pull requests when there are
-                 no drafts to count; the email is still about something. */
-              const nDrafts = live.reduce((n, s) => n + (counts[String(s.number)] ?? 1), 0)
-                              || live.length;
-              const only = nDrafts === 1 && live.length === 1
-                ? drafts.find(d => d.number === live[0].number) : null;
-              core.setOutput('subject', only
-                ? `Ready for review: ${only.title.replace(/^\[Ledger\]\s*/, '')}`
-                : nDrafts === 1
-                  ? 'Ready for review: 1 Ledger draft'
-                  : `${nDrafts} Ledger drafts ready for review`);
+              /* THE SUBJECT IS LEFT ALONE. It used to be recomputed here from the
+                 survivors, which put it at odds with the body it introduces: the
+                 headline, the PDF and the Word note all count the pre-render
+                 snapshot and cannot be rebuilt, so a subject reading "1 Ledger
+                 draft" sat over a headline reading "3 drafts ready for review".
+                 Counting survivors also invented a draft when every one of them
+                 legitimately carried zero, naming an article that was not in the
+                 email at all. The banner below is the correction, and it says
+                 exactly which drafts still need review. */
               core.setOutput('note',
                 `${parts.join('; ')} while this email was being prepared. The count above, the ` +
                 `attachments and the article text below were all built moments earlier, so ignore ` +

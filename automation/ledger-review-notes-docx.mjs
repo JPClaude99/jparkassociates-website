@@ -166,7 +166,22 @@ async function articleTitle(path, ref) {
  * inline code and links, including bold inside a link. Anything unrecognised
  * stays literal text — a stray asterisk must never eat the rest of a sentence.
  */
+/* U+E000..U+E0FF is a private-use area: nothing in a pull-request body can
+   contain these, and xmlSafe leaves them alone, so they are safe sentinels. */
+const ESC_BASE = 0xe000;
+const ESCAPABLE = '\\`*_{}[]()#+-.!~|<>&"\'';
+/* Backslash escapes are resolved BEFORE the alternation runs, the way marked
+   resolves them in a pre-pass. As one more alternative they could not win
+   against an emphasis alternative that started earlier: "*a\*b*" printed an
+   italic "a\" and a literal "b*", showing the backslash the author wrote to
+   hide the asterisk and mis-terminating the emphasis. */
+const maskEscapes = t => String(t).replace(/\\([\\`*_{}\[\]()#+\-.!~|<>&"'])/g,
+  (m, c) => String.fromCharCode(ESC_BASE + ESCAPABLE.indexOf(c)));
+const unmaskEscapes = t => String(t).replace(/[\ue000-\ue0ff]/g,
+  c => ESCAPABLE[c.charCodeAt(0) - ESC_BASE] || '');
+
 function runs(md, base = {}, depth = 0, inLink = false) {
+  if (!depth && !inLink) md = maskEscapes(md);
   /* Every emphasis branch recurses now, so the "cannot recurse more than once"
      that used to hold for link text no longer does. Each step strictly shortens
      the string, so this terminates on its own; the cap is a backstop against a
@@ -194,19 +209,19 @@ function runs(md, base = {}, depth = 0, inLink = false) {
     // Double-backtick first: a span written ``a ` b`` holds a literal
     // backtick, and the single-backtick branch closed on it and
     // mis-delimited the rest of the line into monospace.
-    // Backslash escapes come FIRST, or \*not bold\* has its asterisks eaten by
-    // the emphasis branches and the backslashes printed instead — the exact
-    // inversion of what the author asked for.
-    '\\\\(?<esc>[\\\\`*_{}\\[\\]()#+\\-.!~|<>&\"\'])',
     '``(?<code2>(?:[^`]|`(?!`))+)``',
     '`(?<code>[^`]+)`',
     // Link text may itself contain balanced brackets — "[Form 1099-NEC
     // [instructions]](https://…)" is ordinary GFM and used to print whole,
     // as text, with no link on it at all.
+    '!\\[(?<alt>(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]\\((?<img>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
     '\\[(?<text>(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*)\\]\\((?<url>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
     // A bare CommonMark autolink. The PDF renders it as a live link; the
     // Word note printed the angle brackets and no hyperlink at all.
     '<(?<auto>https?://[^>\\s]+)>',
+    // <someone@example.com> — the packet renders a mailto link and this printed
+    // the angle brackets with nothing behind them.
+    '<(?<mail>[^\\s<>@]+@[^\\s<>@]+\\.[^\\s<>@]+)>',
     // GFM strikethrough. `marked` renders <del>; this printed the tildes.
     '~~(?<del>[^~]+)~~',
     /* A BARE url, which is how a source gets pasted into a pull-request body
@@ -216,7 +231,7 @@ function runs(md, base = {}, depth = 0, inLink = false) {
     '(?<bare>https?://[^\\s<>()\\[\\]]+(?:\\([^\\s()]*\\)[^\\s<>()\\[\\]]*)*)',
   ].join('|'), 'gs');
   let last = 0, m;
-  const lit = t => { if (t) out.push(new TextRun({ text: t, font: SANS, size: pt(10), color: SLATE, ...base })); };
+  const lit = t => { if (t) out.push(new TextRun({ text: unmaskEscapes(t), font: SANS, size: pt(10), color: SLATE, ...base })); };
 
   while ((m = re.exec(md)) !== null) {
     lit(md.slice(last, m.index));
@@ -231,9 +246,7 @@ function runs(md, base = {}, depth = 0, inLink = false) {
        to the source. Emphasis nested inside emphasis was flattened the same
        way. Every branch now recurses, with its own styling folded into `base`
        so the inner runs inherit it. */
-    if (g.esc !== undefined) {
-      lit(g.esc);
-    } else if (g.del !== undefined) {
+    if (g.del !== undefined) {
       out.push(...runs(g.del, { ...base, strike: true }, depth + 1, inLink));
     } else if (g.bi !== undefined) {
       out.push(...runs(g.bi, { ...base, bold: true, italics: true }, depth + 1, inLink));
@@ -249,25 +262,40 @@ function runs(md, base = {}, depth = 0, inLink = false) {
       // lone backtick. Not a trim(): interior padding is content.
       const raw = g.code ?? g.code2;
       const codeText = /^ [\s\S]* $/.test(raw) && raw.trim() ? raw.slice(1, -1) : raw;
-      out.push(new TextRun({ text: codeText, font: 'Consolas', size: pt(9.5), ...base, color: NAVY_700 }));
+      // font and size after the spread, like color: a heading passes font: SANS
+      // and size: pt(11) as `base`, and spreading it last repainted the code
+      // span in Arial — a file path in a heading then read as a hyperlink.
+      out.push(new TextRun({ text: unmaskEscapes(codeText), ...base, font: 'Consolas',
+                             size: Math.max(14, Math.round((base.size || pt(10)) * 0.95)),
+                             color: NAVY_700 }));
     } else {
+      const linkRun = text => new TextRun({
+        text: unmaskEscapes(text), font: SANS, size: pt(10), ...base,
+        color: NAVY_700, underline: { type: 'single', color: NAVY_700 },
+      });
       if (g.bare !== undefined) {
         // Trailing sentence punctuation is not part of the URL.
         const m2 = g.bare.match(/^(.*?)([.,;:!?]*)$/s);
         const target = m2[1], tail = m2[2];
         out.push(inLink
-          ? new TextRun({ text: target, font: SANS, size: pt(10), ...base,
-                          color: NAVY_700, underline: { type: 'single', color: NAVY_700 } })
-          : new ExternalHyperlink({ link: target, children: [new TextRun({
-              text: target, font: SANS, size: pt(10), ...base,
-              color: NAVY_700, underline: { type: 'single', color: NAVY_700 } })] }));
+          ? linkRun(target)
+          : new ExternalHyperlink({ link: target, children: [linkRun(target)] }));
         if (tail) lit(tail);
         continue;
       }
-      const linkRun = (text, url) => new TextRun({
-        text, font: SANS, size: pt(10), ...base,
-        color: NAVY_700, underline: { type: 'single', color: NAVY_700 },
-      });
+      if (g.img !== undefined) {
+        // An image a reviewer cannot see in a Word note is still worth naming
+        // and linking; this printed a bare "!" in front of a link.
+        const label = unmaskEscapes(g.alt || '').trim() || 'image';
+        out.push(inLink ? linkRun(label)
+          : new ExternalHyperlink({ link: decodeEntities(g.img), children: [linkRun(label)] }));
+        continue;
+      }
+      if (g.mail !== undefined) {
+        out.push(inLink ? linkRun(g.mail)
+          : new ExternalHyperlink({ link: `mailto:${g.mail}`, children: [linkRun(g.mail)] }));
+        continue;
+      }
       /* A HYPERLINK INSIDE A HYPERLINK IS NOT A THING WORD CAN OPEN. docx only
          converts an ExternalHyperlink at the paragraph level, so one nested in
          another serialized as a bare <w:externalHyperlink/> — an element that
@@ -277,9 +305,9 @@ function runs(md, base = {}, depth = 0, inLink = false) {
          and its underline and stops being a relationship. */
       if (g.auto !== undefined) {
         // A bare autolink: the text and the target are the same string.
-        out.push(inLink ? linkRun(g.auto, g.auto) : new ExternalHyperlink({
+        out.push(inLink ? linkRun(g.auto) : new ExternalHyperlink({
           link: g.auto,
-          children: [linkRun(g.auto, g.auto)],
+          children: [linkRun(g.auto)],
         }));
         continue;
       }
@@ -291,9 +319,12 @@ function runs(md, base = {}, depth = 0, inLink = false) {
       // CommonMark lets a destination be wrapped in angle brackets — the form
       // the scan agent reaches for when a URL has a query string. Kept literal,
       // the link target became "&lt;https://...&gt;" and was simply dead.
-      const url = g.url.replace(/^<(.*)>$/s, '$1').trim();
+      // Entities in a destination are decoded, the way marked decodes them:
+      // taken verbatim, "?a=1&amp;b=2" reached Word as "?a=1&amp;amp;b=2" and
+      // opened a different address than the packet's link.
+      const url = decodeEntities(g.url.replace(/^<(.*)>$/s, '$1').trim());
       const kids = g.text ? runs(g.text, style, depth + 1, true)
-                          : [new TextRun({ text: url || g.text || '', font: SANS, size: pt(10), ...style })];
+                          : [new TextRun({ text: unmaskEscapes(url || g.text || ''), font: SANS, size: pt(10), ...style })];
       // An empty destination — [text](<>) — would become an external
       // relationship with Target="", a dead link Word may object to.
       if (!url || inLink) out.push(...kids);
@@ -379,11 +410,43 @@ function mdTable(lines) {
    a second article's "1. 2." cannot continue the first's. */
 let olInstance = 0;
 
+const isDelimiterRow = line => {
+  const cells = String(line).trim().replace(/^\|/, '').replace(/\|\s*$/, '').split('|');
+  return cells.length > 0 && cells.every(c => /^\s*:?-+:?\s*$/.test(c));
+};
+
+/* Reference links. `marked` collects "[label]: https://…" definition lines,
+   hides them, and resolves [text][label] / [label][] / [label] against them;
+   this printed both the use and the definition as literal text. Resolved into
+   inline form before the block walk, which is the smallest change that makes
+   the note and the packet agree. */
+const resolveRefs = md => {
+  const defs = new Map();
+  const body = String(md ?? '').replace(
+    /^[ \t]*\[([^\]\n]+)\]:[ \t]*(\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$\n?/gm,
+    (m, label, url) => { if (!defs.has(label.toLowerCase())) defs.set(label.toLowerCase(), url); return ''; });
+  if (!defs.size) return body;
+  const at = label => defs.get(String(label).toLowerCase());
+  return body
+    // [text][label]
+    .replace(/\[([^\]\n]*)\]\[([^\]\n]+)\]/g, (m, text, label) => {
+      const u = at(label); return u ? `[${text}](${u})` : m;
+    })
+    // [label][] and a bare [label] that is not already a link or an image
+    .replace(/(!?)\[([^\]\n]+)\](\[\])?(?!\()/g, (m, bang, label, empty) => {
+      if (bang) return m;
+      const u = at(label);
+      return u && (empty || defs.has(label.toLowerCase())) ? `[${label}](${u})` : m;
+    });
+};
+
 function mdBlocks(md) {
-  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+  const lines = resolveRefs(md).replace(/\r\n/g, '\n').split('\n');
   const out = [];
   let para = [];
-  let inOl = false, olNext = null;
+  /* One counter per nesting level, so a sub-list under a hand-numbered list
+     counts on its own instead of every item printing the parent's number. */
+  let inOl = false, olNums = [];
 
   const flush = () => {
     if (!para.length) return;
@@ -394,15 +457,18 @@ function mdBlocks(md) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const t = line.trim();
-    /* Any non-blank line that is NOT a list item ends the run — a heading, a
-       rule, a table, a fence, a blockquote, a paragraph. A blank one does not:
-       a loose list is still one list, and restarting there would put two "1."s
-       in what the reader sees as one sequence. This has to be at the TOP of the
-       loop: sitting further down, every branch that `continue`s — heading,
-       setext, rule, table, fence — skipped it, so two ordered lists separated
-       by a "### After merging" heading still shared one numbering instance and
-       the second list started at 3. */
-    if (t && !/^(\s*)([-*+]|\d+[.)])\s+/.test(line)) inOl = false;
+    /* What ENDS an ordered list run: a non-blank, UNINDENTED line that is not
+       itself an ordered item at the top level — a heading, a rule, a table, a
+       fence, a blockquote, a new paragraph. It has to be at the TOP of the
+       loop, because every branch below `continue`s past anything written after
+       it, which is how two lists separated by a "### After merging" heading
+       ended up sharing one sequence.
+       What does NOT end it: a blank line (a loose list is still one list), an
+       indented continuation line, and a nested sub-list of either kind. Ending
+       the run on those meant a list written "1. / 1. / 1." — the house style in
+       automation/PIPELINE.md, and legal markdown that renders 1, 2, 3 —
+       restarted at 1 in Word after every nested bullet. */
+    if (t && !/^\s/.test(line) && !/^\d+[.)]\s+/.test(line)) { inOl = false; olNums = []; }
 
     // A fenced block is verbatim. Without this, `# comment` inside a code
     // sample became a heading and `- item` became a bullet, and the fence
@@ -452,7 +518,8 @@ function mdBlocks(md) {
        ran together into one paragraph. Checked before the rule branch, because
        a --- under text is a heading and a --- under a blank line is a rule. */
     const under = lines[i + 1] && lines[i + 1].trim();
-    if (t && !inOl && under && /^(=+|-{2,})$/.test(under) && !/^[-*+]\s/.test(t)) {
+    if (t && !inOl && under && /^(=+|-{2,})$/.test(under) &&
+        !/^[-*+]\s/.test(t) && !/^\d+[.)]\s/.test(t)) {
       flush();
       out.push(noteHeading(t, under[0] === '=' ? 3 : 4));
       i++;
@@ -460,7 +527,12 @@ function mdBlocks(md) {
     }
     if (/^([-*_])\1{2,}$/.test(t)) { flush(); continue; }        // horizontal rule
 
-    if (t.startsWith('|') && lines[i + 1] && /^\s*\|?[\s:|-]*-[\s:|-]*\|/.test(lines[i + 1])) {
+    /* EVERY cell of the delimiter row has to be dashes. The old test only
+       needed one dash somewhere, so "| - | pending |" looked like a delimiter,
+       mdTable spliced that row out unconditionally, and the word "pending"
+       vanished from the document — while `marked` renders none of those three
+       lines as a table at all. */
+    if (t.startsWith('|') && lines[i + 1] && isDelimiterRow(lines[i + 1])) {
       flush();
       const block = [];
       while (i < lines.length && lines[i].trim().startsWith('|')) block.push(lines[i++]);
@@ -474,16 +546,32 @@ function mdBlocks(md) {
       flush();
       const level = Math.min(2, Math.floor(li[1].replace(/\t/g, '  ').length / 2));
       const ordered = /\d/.test(li[2]);
-      // A new numbering instance whenever an ordered list STARTS — that is,
-      // when this ordered item does not directly follow another one.
-      if (ordered && !inOl) {
+      // A new numbering instance whenever a TOP-LEVEL ordered list starts.
+      if (ordered && !level && !inOl) {
         olInstance++;
         const first = parseInt(li[2], 10);
-        olNext = Number.isFinite(first) && first !== 1 ? first : null;
+        olNums = [Number.isFinite(first) && first !== 1 ? first : null];
       }
-      inOl = ordered;
-      out.push(bullet(li[3], ordered, level, olInstance, olNext));
-      if (olNext !== null && ordered && !level) olNext++;
+      if (!level) inOl = ordered;
+      let n = null;
+      if (ordered) {
+        // Hand-numbered only while the top level is: a Word list cannot be told
+        // where to start, so once one level is written out by hand the levels
+        // under it have to be too, or they inherit the parent's number and three
+        // different steps all print as "6.".
+        if (olNums[0] !== null && olNums[0] !== undefined) {
+          if (olNums[level] === undefined || olNums[level] === null) {
+            const own = parseInt(li[2], 10);
+            olNums[level] = Number.isFinite(own) ? own : 1;
+          }
+          n = olNums[level];
+          olNums[level]++;
+          olNums.length = level + 1;      // a shallower item restarts the deeper ones
+        }
+      } else if (!level) {
+        olNums = [];
+      }
+      out.push(bullet(li[3], ordered, level, olInstance, n));
       continue;
     }
 
@@ -576,7 +664,10 @@ function articleBlock(title, path, md) {
   }),
   new Paragraph({
     keepNext: true, spacing: { after: 120 },
-    children: [new TextRun({ text: meta, font: 'Consolas', size: pt(9), color: GREY })],
+    // Through runs(): the byline is the line the author writes after the
+    // heading, and "**needs a fact check**" appended to it printed its
+    // asterisks here while the packet bolded them.
+    children: runs(meta, { font: 'Consolas', size: pt(9), color: GREY }),
   }),
   rule(GOLD_RULE, 4),
   ...(body.trim() ? mdBlocks(body) : [new Paragraph({
@@ -698,9 +789,23 @@ async function main() {
       },
       footers: {
         default: new Footer({
-          children: [new Paragraph({
+          children: [
+          // The firm bio, verbatim from blog/_template.html. Every other Ledger
+          // artifact carries it; this document was the only one whose footer
+          // did not say who the firm is.
+          new Paragraph({
             alignment: AlignmentType.CENTER,
             border: { top: { style: BorderStyle.SINGLE, size: 4, color: HAIRLINE, space: 4 } },
+            spacing: { after: 40 },
+            children: [new TextRun({
+              text: 'A personalized CPA office on Foothill Blvd. in La Crescenta, keeping the books, ' +
+                    'taxes, and payroll of Crescenta Valley and Los Angeles businesses in order for ' +
+                    'over 15 years.',
+              font: SANS, size: pt(7.5), color: GREY,
+            })],
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
             children: [
               new TextRun({ text: '2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214  ·  (818) 248-1580  ·  Page ',
                             font: SANS, size: pt(8), color: GREY }),

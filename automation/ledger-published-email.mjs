@@ -60,13 +60,24 @@ async function ghPaged(pathname) {
 async function isArticle(slug) {
   try {
     const html = await fs.readFile(path.join(DIR, 'blog', `${slug}.html`), 'utf8');
-    /* Tolerant of how the class attribute is written. The template emits
-       `class="article-body"`, but this file is hand-edited by the scan agent
-       every run, and `class='article-body'` or `class = "article-body"` used to
-       fail the test — which does not just skip the announcement, it drops the
-       slug before the orphan alarm below can see it. The article is live on the
-       site and the run is green and silent about it. */
-    return /\bclass\s*=\s*(?:"[^"]*\barticle-body\b|'[^']*\barticle-body\b|article-body\b)/.test(html);
+    /* Tolerant of how the class ATTRIBUTE is written, exact about the class
+       NAME. The template emits `class="article-body"`, but this file is
+       hand-edited by the scan agent every run, and `class='article-body'` or
+       `class = "article-body"` used to fail the test — which does not just skip
+       the announcement, it drops the slug before the orphan alarm below can see
+       it, so a live article goes unmentioned by a green run.
+       \b is the wrong tool for the name: it treats a hyphen as a boundary, so
+       `article-body-preview` matched. That broke the check in BOTH directions —
+       a hub page carrying `class="article-body-wide"` was announced as an
+       article, and, if it was not in the manifest, the orphan alarm threw and
+       suppressed the notice for the real article merged alongside it. Split the
+       attribute on whitespace and compare tokens, which is what the browser
+       does. */
+    const m = html.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g) || [];
+    return m.some(a => {
+      const v = a.replace(/^[^=]*=\s*/, '').replace(/^["']|["']$/g, '');
+      return v.split(/\s+/).includes('article-body');
+    });
   } catch {
     console.log(`::warning::blog/${slug}.html is not in the checkout; not treating it as an article.`);
     return false;

@@ -327,8 +327,15 @@ const actionHtml = (heading, items, lead = [], ordered = false, start = 1, rever
   // An ORDERED checklist numbers its steps in the marker column instead of
   // repeating the checkmark: the packet renders the <ol> markers, and a panel
   // that dropped them left "fix step 4" pointing at nothing.
+  /* The extractor decides each item's marker, per source list. Counting here
+     could not: two lists written one after the other inside one panel share the
+     renderer, and a running counter numbered the unordered one too. */
   let n = Number.isFinite(start) ? start : 1;
-  const marker = i => (i && i.cont ? '' : ordered ? `${listMarker(reversed ? n-- : n++, type)}.` : '&#10003;');
+  const marker = i => {
+    if (i && i.cont) return '';
+    if (i && i.marker !== undefined) return i.marker === '\u2713' ? '&#10003;' : esc(i.marker);
+    return ordered ? `${listMarker(reversed ? n-- : n++, type)}.` : '&#10003;';
+  };
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
       <td class="e-cta" bgcolor="${C.NAVY_900}" style="background-color:${C.NAVY_900};border-radius:10px;padding:20px 24px;">
