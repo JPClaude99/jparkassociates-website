@@ -36,6 +36,7 @@
 import fs from 'node:fs/promises';
 import puppeteer from 'puppeteer';
 import { marked } from 'marked';
+import { C, esc, panel, callout, emailShell } from './email-chrome.mjs';
 
 const API   = process.env.GITHUB_API_URL || 'https://api.github.com';
 const REPO  = process.env.GITHUB_REPOSITORY;
@@ -156,8 +157,6 @@ async function extractArticle(page, html) {
 
 /* ---------- rendering ---------------------------------------------------- */
 
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
 const notesPanel = (kind, label, heading, innerHtml) => `
   <aside class="notes ${kind}">
     <div class="notes-head">
@@ -169,121 +168,81 @@ const notesPanel = (kind, label, heading, innerHtml) => `
 
 /* ---------- branded HTML email body -------------------------------------- */
 
-/*
- * House email chrome, matching emails/_template.html: cream ground, 640px
- * table, navy header with the white logo, gold letterspaced eyebrow, Georgia
- * headings, Arial body. This is an internal ops email, so it drops the client
- * template's unsubscribe and "book a call" CTA and points at GitHub instead.
- * Table-based with inline styles — Gmail and Outlook strip everything else.
- */
+/* Chrome, palette and the dark-mode reasoning all live in email-chrome.mjs so
+   the draft alert and the publish notice cannot drift apart. Read the header
+   note there before changing a colour. */
 function buildEmailHtml(prs, generatedOn, hasPdf) {
-  const NAVY = '#111c33', NAVY_900 = '#1B2A4A', GOLD = '#C9A84C', GOLD_300 = '#e0c87e';
-  const CREAM = '#F5F0E8', SLATE = '#3A4660', GREY = '#5C6577';
-  const articles = prs.reduce((n, pr) => n + pr.articles.length, 0);
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-  const prBlocks = prs.map(pr => `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
-      <tr>
-        <td style="border:1px solid #e8e2d6;border-radius:10px;padding:18px 22px;">
-          <p style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${GOLD};">
-            PR #${esc(pr.number)} &middot; open ${esc(pr.age)}
-          </p>
-          <p style="margin:0 0 12px;font:700 17px/1.35 Georgia,'Times New Roman',serif;color:${NAVY_900};">${esc(pr.title)}</p>
-          ${pr.articles.length ? `
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">
-            ${pr.articles.map((a, i) => `
-            <tr>
-              <td width="26" valign="top" style="font:700 14px/1.6 Georgia,'Times New Roman',serif;color:${GOLD};">${i + 1}.</td>
-              <td style="font:400 14px/1.55 Arial,Helvetica,sans-serif;color:${SLATE};padding-bottom:8px;">
-                ${esc(a.title)}
-                <span style="display:block;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${GREY};">
-                  ${[a.category, a.readTime].filter(Boolean).map(esc).join(' &middot; ')}
-                </span>
-              </td>
-            </tr>`).join('')}
-          </table>` : ''}
-          <a href="${esc(pr.html_url)}" style="font:600 13px/1.4 Arial,Helvetica,sans-serif;color:${NAVY_900};text-decoration:underline;">Review on GitHub &rarr;</a>
-        </td>
-      </tr>
-    </table>`).join('');
+  // The body is written once before the render work (which can fail) and again
+  // after it succeeds. On that first pass there is no article data yet, so
+  // nothing may claim a count it does not have — this is what produced the
+  // "0 drafts, written and waiting." headline.
+  const articleCount = prs.reduce((n, pr) => n + pr.articles.length, 0);
+  const counted = articleCount > 0;
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" />
-<title>Ledger drafts awaiting publish</title></head>
-<body style="margin:0;padding:0;background-color:${CREAM};">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${plural(articles, 'Ledger article')} drafted and waiting &mdash; merging publishes them.</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CREAM};">
-<tr><td align="center" style="padding:28px 12px;">
-<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:100%;">
+  const headline  = counted ? `${plural(articleCount, 'draft')}, written and waiting.`
+                            : 'Drafts written and waiting.';
+  const preheader = counted ? `${plural(articleCount, 'Ledger article')} drafted and waiting — merging publishes them.`
+                            : 'Ledger drafts are written and waiting — merging publishes them.';
+  const intro     = counted
+    ? `${articleCount === 1 ? 'An article is' : 'Articles are'} drafted but not yet live on jparkassociates.com.
+       Merging the pull request is what publishes ${articleCount === 1 ? 'it' : 'them'}.`
+    : `${plural(prs.length, 'pull request')} drafted but not yet live on jparkassociates.com.
+       Merging is what publishes the articles inside.`;
 
-  <tr><td style="background-color:${NAVY};border-radius:14px 14px 0 0;padding:30px 36px 26px;">
-    <img src="https://jparkassociates.com/assets/brand/logo-email-white-760.png" alt="J Park &amp; Associates &mdash; Certified Public Accountants" width="340" style="display:block;width:340px;max-width:100%;height:auto;border:0;" />
-  </td></tr>
+  const body = `
+    <p class="t-body" style="margin:0 0 18px;font:400 15px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">${intro}</p>
+    ${prs.map(pr => panel(`
+      <p class="t-gold" style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GOLD_TEXT};">
+        PR #${esc(pr.number)} &middot; open ${esc(pr.age)}
+      </p>
+      <p class="t-title" style="margin:0 0 12px;font:700 17px/1.35 Georgia,'Times New Roman',serif;color:${C.NAVY_900};">${esc(pr.title)}</p>
+      ${pr.articles.length ? `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">
+        ${pr.articles.map((a, i) => `
+        <tr>
+          <td width="26" valign="top" class="t-gold" style="font:700 14px/1.6 Georgia,'Times New Roman',serif;color:${C.GOLD_TEXT};">${i + 1}.</td>
+          <td class="t-body" style="font:400 14px/1.55 Arial,Helvetica,sans-serif;color:${C.SLATE};padding-bottom:8px;">
+            ${esc(a.title)}
+            <span class="t-muted" style="display:block;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${C.GREY};">
+              ${[a.category, a.readTime].filter(Boolean).map(esc).join(' &middot; ')}
+            </span>
+          </td>
+        </tr>`).join('')}
+      </table>` : ''}
+      <a href="${esc(pr.html_url)}" class="t-link" style="font:600 13px/1.4 Arial,Helvetica,sans-serif;color:${C.NAVY_900};text-decoration:underline;">Review on GitHub &rarr;</a>
+    `)).join('')}`;
 
-  <tr><td style="background-color:${NAVY};padding:0 36px 34px;">
-    <p style="margin:0 0 8px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:3px;text-transform:uppercase;color:${GOLD_300};">The Ledger &middot; draft alert</p>
-    <h1 style="margin:0;font:700 30px/1.2 Georgia,'Times New Roman',serif;color:${CREAM};">${plural(articles, 'draft')}, written and waiting.</h1>
-    <p style="margin:12px 0 0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:rgba(245,240,232,0.7);">${esc(generatedOn)}</p>
-  </td></tr>
-
-  <tr><td style="background-color:#ffffff;padding:30px 36px 6px;">
-    <p style="margin:0 0 18px;font:400 15px/1.6 Arial,Helvetica,sans-serif;color:${SLATE};">
-      ${articles === 1 ? 'An article is' : 'Articles are'} drafted but not yet live on jparkassociates.com.
-      Merging the pull request is what publishes ${articles === 1 ? 'it' : 'them'}.
-    </p>
-    ${prBlocks}
-  </td></tr>
-
-  ${hasPdf ? `
-  <tr><td style="background-color:#ffffff;padding:6px 36px 6px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td style="background-color:${CREAM};border-left:4px solid ${GOLD};border-radius:10px;padding:20px 24px;">
-        <p style="margin:0 0 8px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2.5px;text-transform:uppercase;color:${GOLD};">Attached</p>
-        <p style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${SLATE};">
-          <strong style="color:${NAVY_900};">ledger-drafts.pdf</strong> &mdash; each draft laid out as it will read on the site,
+  const aside = hasPdf
+    ? callout('Attached', `
+        <p class="t-body" style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
+          <strong class="t-strong" style="color:${C.NAVY_900};">ledger-drafts.pdf</strong> &mdash; each draft laid out as it will read on the site,
           with a reviewer-notes panel after it carrying the sources, the reasoning, and anything the scan hedged on.
           Read it anywhere; no GitHub needed.
-        </p>
-      </td>
-    </tr></table>
-  </td></tr>` : `
-  <tr><td style="background-color:#ffffff;padding:6px 36px 6px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td style="background-color:${CREAM};border-left:4px solid ${GREY};border-radius:10px;padding:20px 24px;">
-        <p style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${SLATE};">
+        </p>`)
+    : callout('', `
+        <p class="t-body" style="margin:0;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.SLATE};">
           The PDF review packet could not be built this run &mdash; see the Actions log. Review the pull request directly.
-        </p>
-      </td>
-    </tr></table>
-  </td></tr>`}
+        </p>`, C.GREY);
 
-  <tr><td style="background-color:#ffffff;border-radius:0 0 14px 14px;padding:28px 36px 36px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td style="background-color:${NAVY_900};border-radius:12px;padding:26px 28px;" align="center">
-        <p style="margin:0 0 14px;font:400 15px/1.5 Arial,Helvetica,sans-serif;color:${CREAM};">Ready to publish?</p>
-        <a href="${esc(prs[0].html_url)}" style="display:inline-block;background-color:${GOLD};color:${NAVY_900};font:600 14px/1 Arial,Helvetica,sans-serif;text-decoration:none;border-radius:999px;padding:13px 28px;">Open the pull request</a>
-        <p style="margin:14px 0 0;font:400 12px/1.5 Arial,Helvetica,sans-serif;color:#9aa3b5;">Merging deploys to jparkassociates.com automatically.</p>
-      </td>
-    </tr></table>
-  </td></tr>
-
-  <tr><td style="padding:24px 36px 8px;" align="center">
-    <p style="margin:0 0 6px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${GREY};">
-      J Park &amp; Associates &middot; Certified Public Accountants<br />
-      2529 Foothill Blvd. Ste 101, La Crescenta, CA 91214 &middot; (818) 248-1580
-    </p>
-    <p style="margin:0;font:400 11px/1.6 Arial,Helvetica,sans-serif;color:#8a92a3;">
-      Internal automation &mdash; you&rsquo;ll get this once a day until the pull request is merged or closed.<br />
-      <a href="https://github.com/${esc(REPO)}/blob/main/.github/workflows/ledger-draft-alert.yml" style="color:${GREY};">ledger-draft-alert.yml</a>
-    </p>
-  </td></tr>
-
-</table>
-</td></tr></table>
-</body>
-</html>`;
+  return emailShell({
+    title: 'Ledger drafts awaiting publish',
+    preheader,
+    eyebrow: 'The Ledger · draft alert',
+    headline,
+    dateLine: generatedOn,
+    bodyHtml: body,
+    asideHtml: aside,
+    cta: {
+      href: prs[0].html_url,
+      label: 'Open the pull request',
+      lead: 'Ready to publish?',
+      caption: 'Merging deploys to jparkassociates.com automatically.',
+    },
+    footNote: `Internal automation &mdash; you&rsquo;ll get this once a day until the pull request is merged or closed.<br />
+      <a href="https://github.com/${esc(REPO)}/blob/main/.github/workflows/ledger-draft-alert.yml" class="t-link" style="color:${C.GREY};">ledger-draft-alert.yml</a>`,
+  });
 }
 
 function buildHtml(prs, generatedOn) {
