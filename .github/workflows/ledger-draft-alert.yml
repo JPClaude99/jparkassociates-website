@@ -147,7 +147,7 @@ jobs:
           secure: true
           username: ${{ secrets.LEDGER_ALERT_SMTP_USER }}
           password: ${{ secrets.LEDGER_ALERT_SMTP_PASS }}
-          from: Ledger Bot <${{ secrets.LEDGER_ALERT_SMTP_USER }}>
+          from: The Ledger Bot <marketing@jparkassociates.com>
           to: jasonpark@jparkassociates.com
           subject: ${{ steps.find.outputs.subject }}
           attachments: ${{ steps.mail.outputs.pdf }}
