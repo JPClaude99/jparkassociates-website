@@ -129,6 +129,9 @@ function runs(md, base = {}) {
     '(?<![A-Za-z0-9_])_(?!\\s)(?<i2>.+?)(?<!\\s)_(?![A-Za-z0-9_])',
     '`(?<code>[^`]+)`',
     '\\[(?<text>[^\\]]*)\\]\\((?<url>(?:[^()\\s]|\\([^()\\s]*\\))+)(?:\\s+"[^"]*")?\\)',
+    // A bare CommonMark autolink. The PDF renders it as a live link; the
+    // Word note printed the angle brackets and no hyperlink at all.
+    '<(?<auto>https?://[^>\\s]+)>',
   ].join('|'), 'gs');
   let last = 0, m;
   const lit = t => { if (t) out.push(new TextRun({ text: t, font: SANS, size: pt(10), color: SLATE, ...base })); };
@@ -145,6 +148,15 @@ function runs(md, base = {}) {
     } else if (g.code !== undefined) {
       out.push(new TextRun({ text: g.code, font: 'Consolas', size: pt(9.5), color: NAVY_700, ...base }));
     } else {
+      if (g.auto !== undefined) {
+        // A bare autolink: the text and the target are the same string.
+        out.push(new ExternalHyperlink({
+          link: g.auto,
+          children: [new TextRun({ text: g.auto, font: SANS, size: pt(10), ...base,
+                                   color: NAVY_700, underline: { type: 'single', color: NAVY_700 } })],
+        }));
+        continue;
+      }
       // Recurse into the link text so **bold** and `code` inside a link render
       // as bold and code, not as literal asterisks and backticks. The doc
       // comment above has always claimed this; now it is true. Link text

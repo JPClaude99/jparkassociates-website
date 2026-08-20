@@ -208,16 +208,32 @@ export const htmlBudget = () => Math.floor(GMAIL_CLIP_BYTES / WIRE_OVERHEAD);
 /* Items arrive flattened, each carrying its nesting depth. Nested <ul> inside
    <li> is the markup mail clients disagree about most, so depth becomes an
    indent on a flat list — same reading order, no client-specific collapse. */
-const listHtml = (items, ordered, start) => {
+const listHtml = (items, ordered, start, type, reversed) => {
   const norm = items.map(i => (typeof i === 'string' ? { html: i, depth: 0 } : i));
   const tag = ordered ? 'ol' : 'ul';
   // `start` carried through, or the packet prints 5,6,7 and the email 1,2,3.
   // `!== 1`, not `> 1`: start="0" and negatives are real values the packet
   // honours, and the two artifacts have to agree on what a step is called.
+  // start / type / reversed all carried: the packet honours them, and the two
+  // artifacts have to agree on what a step is called.
   const from = ordered && Number.isFinite(start) && start !== 1 ? ` start="${Number(start)}"` : '';
+  const kind = ordered && /^[1aAiI]$/.test(String(type || '')) ? ` type="${type}"` : '';
+  const rev = ordered && reversed ? ' reversed' : '';
+  /* Sub-items are <li> here and nested <li> in the packet, so an <ol> holding
+     one counted it and the packet did not: "1. file 2.(sub) 3. pay" against
+     "1. file / sub / 2. pay". Every top-level step therefore states its own
+     number. Not for `reversed` — its base is the item count, which a list
+     split across blocks no longer knows; there the client's own count is
+     closer than a guess. */
+  let n = ordered && !reversed ? (Number.isFinite(start) ? Number(start) : 1) : null;
+  /* `cont` is the REST of an item that a table or a figure interrupted. It is
+     the same step, so it gets no marker and consumes no number — otherwise the
+     PDF's "2." was the email's "3." from the first interrupted step onward. */
+  const marker = i => (i.cont ? 'list-style:none;'
+                             : i.depth ? `margin-left:${i.depth * 18}px;list-style-type:circle;` : '');
   return `
-      <${tag}${from} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
-        ${norm.map(i => `<li style="margin:0 0 7px;${i.depth ? `margin-left:${i.depth * 18}px;list-style-type:circle;` : ''}">${i.html}</li>`).join('')}
+      <${tag}${from}${kind}${rev} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
+        ${norm.map(i => `<li${n !== null && !i.depth && !i.cont ? ` value="${n++}"` : ''} style="margin:0 0 7px;${marker(i)}">${i.html}</li>`).join('')}
       </${tag}>`;
 };
 
@@ -255,10 +271,10 @@ const actionHtml = (heading, items, lead = []) => `
         ${heading ? `<p style="margin:0 0 12px;font:700 15px/1.35 ${SERIF};color:${C.GOLD_PILL};">${esc(heading)}</p>` : ''}
         ${lead.map(l => `<p style="margin:0 0 12px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};">${l}</p>`).join('')}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-          ${flat(items).map(i => `
+          ${items.map(i => `
           <tr>
-            <td width="20" valign="top" style="font:700 14px/1.6 ${SERIF};color:${C.GOLD_PILL};">&#10003;</td>
-            <td style="font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};padding-bottom:7px;">${i}</td>
+            <td width="20" valign="top" style="font:700 14px/1.6 ${SERIF};color:${C.GOLD_PILL};">${i && i.cont ? '' : '&#10003;'}</td>
+            <td style="font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${C.CREAM};padding-bottom:7px;">${indent(i)}</td>
           </tr>`).join('')}
         </table>
       </td>
@@ -270,14 +286,13 @@ const actionHtml = (heading, items, lead = []) => `
 const indent = i => (typeof i === 'string' ? i : (i.depth
   ? `<span style="padding-left:${i.depth * 16}px;display:inline-block;">&#8250; ${i.html}</span>`
   : i.html));
-const flat = items => items.map(indent);
 
 const sourcesHtml = (label, items) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
       <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
         ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
         <ul class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
-          ${flat(items).map(i => `<li style="margin:0 0 5px;">${i}</li>`).join('')}
+          ${items.map(i => `<li style="margin:0 0 5px;${i && i.cont ? 'list-style:none;' : ''}">${indent(i)}</li>`).join('')}
         </ul>
       </td>
     </tr></table>`;
@@ -295,7 +310,7 @@ export function articleBlocksHtml(blocks) {
       case 'h3':
         return `<h3 class="t-title" style="margin:22px 0 8px;font:700 16px/1.35 ${SERIF};color:${C.NAVY_900};">${b.html || esc(b.text)}</h3>`;
       case 'list':
-        return listHtml(b.items, b.ordered, b.start);
+        return listHtml(b.items, b.ordered, b.start, b.type, b.reversed);
       case 'table':
         return tableHtml(b.rows);
       case 'pre':

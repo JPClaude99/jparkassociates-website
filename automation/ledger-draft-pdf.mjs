@@ -147,12 +147,15 @@ async function extractArticle(page, html) {
       'img, picture, source, video, audio, canvas, svg, map, area, ' +
       // Hidden by the UA stylesheet, so the packet shows nothing while the
       // email would print their contents in full.
-      'dialog, datalist, template, slot')) {
+      'datalist, template')) {
       el.remove();
     }
     // <details> renders collapsed, so its body is absent from innerText and the
     // packet check read the draft as nearly empty. Open it instead.
-    for (const el of body.querySelectorAll('details')) el.setAttribute('open', '');
+    // <details> and <dialog> render only when open; leaving them shut meant
+    // the packet showed nothing where the email printed the contents. <slot>
+    // is display:contents and visible in both, so it is not removed at all.
+    for (const el of body.querySelectorAll('details, dialog')) el.setAttribute('open', '');
     /* Attributes, not just elements. A single inline style can cover the whole
        packet — `position:fixed;width:100%;height:100%;background:#fff` renders
        every page blank — and `display:none`, or the `hidden` attribute that
@@ -171,8 +174,11 @@ async function extractArticle(page, html) {
     const KEEP_ATTR = new Set(['href', 'colspan', 'rowspan', 'class', 'datetime',
                                'lang', 'dir', 'scope', 'rel', 'open',
                                // List numbering: these change what a step is
-                               // called, not what colour it is.
-                               'start', 'type', 'value', 'reversed']);
+                               // called, not what colour it is. `value` is not
+                               // here — it is per <li>, the email cannot carry
+                               // it, so both artifacts renumber rather than
+                               // disagree.
+                               'start', 'type', 'reversed']);
     /* `class` needs an allowlist of its own. Keeping it wholesale handed the
        article the packet's own stylesheet: `<p class="cover-date">` paints
        cream at 55% opacity, which on the white draft ground measures 1.07:1 —
@@ -287,27 +293,40 @@ async function extractArticle(page, html) {
        list item. Keeps links and emphasis, which a textContent fallback loses. */
     const flatten = (node, onNavy) => {
       let out = '';
-      // A separator only where the text on either side does not already have
-      // one, so nothing is glued and nothing is split.
-      const add = t => {
-        if (!t || !t.trim()) return;
-        out += (out && !/\s$/.test(out) && !/^\s/.test(t) ? ' ' : '') + t;
-      };
+      /* Separators belong AROUND BLOCKS and nowhere else. Routing every text
+         node through a separator helper looked like the tidy fix for
+         "<li>LEAD<div>MID</div>TAIL</li>" coming out "MIDTAIL", and it broke
+         ordinary prose on nine of the twenty-one shipped articles: it inserted
+         a space after an inline element ("letter decoder .)"), and its
+         whitespace-only early-return deleted the space between two of them
+         ("the CDTFA <em>before</em>" became "CDTFAbefore").
+
+         So: text nodes and inline elements are appended VERBATIM — their own
+         whitespace is the article's whitespace — and a block child gets a
+         separator before it, and marks that the text after it needs one too. */
+      let afterBlock = false;
+      const gap = t => out && !/\s$/.test(out) && t && !/^\s/.test(t);
       for (const n of node.childNodes) {
-        // Through add(), not appended raw: text that FOLLOWS a block child was
-        // glued to it — "<li>LEAD<div>MID</div>TAIL</li>" came out "MIDTAIL".
-        if (n.nodeType === 3) { add(escHtml(n.nodeValue)); continue; }
+        if (n.nodeType === 3) {
+          const t = escHtml(n.nodeValue);
+          if (afterBlock && gap(t)) out += ' ';
+          afterBlock = false;
+          out += t;
+          continue;
+        }
         if (n.nodeType !== 1) continue;
-        // Descend into ANYTHING holding block content, not only into tags on
-        // the BLOCK list. <span><p>…</p></span> and a table nested three deep
-        // inside a cell both went through inlineNode(), which returns '' for a
-        // block — present in the packet, gone from the email.
-        if (n.tagName === 'A' && n.querySelector && n.querySelector(BLOCK_SEL)) {
-          add(anchorWrap(n, flatten(n, onNavy), onNavy));
-        } else if (BLOCK.has(n.tagName) || (n.querySelector && n.querySelector(BLOCK_SEL))) {
-          add(flatten(n, onNavy));
+        const isA = n.tagName === 'A' && n.querySelector && n.querySelector(BLOCK_SEL);
+        const isBlock = isA || BLOCK.has(n.tagName) || (n.querySelector && n.querySelector(BLOCK_SEL));
+        if (isBlock) {
+          const inner = isA ? anchorWrap(n, flatten(n, onNavy), onNavy) : flatten(n, onNavy);
+          if (inner.trim()) {
+            if (gap(inner)) out += ' ';
+            out += inner;
+            afterBlock = true;
+          }
         } else {
           out += inlineNode(n, onNavy);
+          afterBlock = false;
         }
       }
       return out;
@@ -428,18 +447,35 @@ async function extractArticle(page, html) {
     const listBlocks = (list, onNavy, depth = 0) => {
       const out = [];
       let run = [];
+      const ordered = list.tagName === 'OL';
+      const reversed = list.hasAttribute('reversed');
+      const type = list.getAttribute('type') || undefined;
+      // The packet honours `start` and the email did not, so the same list
+      // printed 5,6,7 in one artifact and 1,2,3 in the other. parseInt, which
+      // is what HTML does: Number('5px') is NaN where the packet reads 5, and
+      // Number('0x10') is 16 where the packet reads 0.
+      const startAttr = (() => {
+        const n = parseInt(list.getAttribute('start'), 10);
+        return Number.isFinite(n) ? n : undefined;
+      })();
+      /* A list broken by a block resumes where it left off. Every chunk used to
+         carry the SAME start, so an interrupted five-step checklist printed
+         1,2 then 1,2,3 — two step ones. Sub-items are not counted: they are not
+         numbered in the packet either. `reversed` is left alone; splitting a
+         countdown is not something an article has ever done, and guessing its
+         base wrong is worse than leaving the attribute to the client. */
+      let emitted = 0;
       const flush = () => {
         if (run.length) {
           out.push({
             kind: 'list',
-            ordered: list.tagName === 'OL',
-            // The packet honours `start` and the email did not, so the same
-            // list printed 5,6,7 in one artifact and 1,2,3 in the other.
-            // Number(), not `|| undefined`: start="0" is a real value.
-            start: list.hasAttribute('start') && Number.isFinite(Number(list.getAttribute('start')))
-              ? Number(list.getAttribute('start')) : undefined,
+            ordered,
+            start: ordered && !reversed && emitted ? (startAttr ?? 1) + emitted : startAttr,
+            type,
+            reversed: reversed || undefined,
             items: run,
           });
+          emitted += run.filter(i => !i.depth && !i.cont).length;
         }
         run = [];
       };
@@ -453,12 +489,7 @@ async function extractArticle(page, html) {
            the <li> itself owned dropped a whole rate table on the floor. */
         const owned = ownedBy(li, OWNED_SEL, p => p !== li && isContainer(p));
 
-        // The item's own text: everything except what it owns, which is
-        // emitted in its own right below.
-        const html = flatten(withoutNodes(li, owned), onNavy).trim();
-        // An <li> whose only content is a table used to emit a blank bullet.
-        if (html) run.push({ html, depth });
-        for (const node of owned) {
+        const emitOwned = (node) => {
           if (node.tagName === 'UL' || node.tagName === 'OL') {
             for (const b of listBlocks(node, onNavy, depth + 1)) {
               if (b.kind === 'list') run.push(...b.items);
@@ -468,7 +499,55 @@ async function extractArticle(page, html) {
             flush();
             out.push(...blocksOfNode(node, onNavy));
           }
+        };
+
+        // An <li> whose only content is a table used to emit a blank bullet.
+        if (!owned.length) {
+          const html = flatten(li, onNavy).trim();
+          if (html) run.push({ html, depth });
+          continue;
         }
+
+        /* SPLIT THE ITEM AT THE BLOCK. Printing all of the item's text and then
+           the block put the sentence that follows a table above it:
+           "<li>lead<pre>code</pre>tail</li>" read "lead tail" and then the
+           code, so "tail" — which is usually a remark ABOUT the block — arrived
+           before the thing it refers to. The packet, which keeps the block
+           inside the bullet, read lead / code / tail. Now both do. */
+        const ownedSet = new Set(owned);
+        /* Everything after the item's first fragment is a CONTINUATION of the
+           same step: no number, no bullet, no checkmark. Without that the
+           email numbered "1. lead / 2. tail / 3. next" where the packet — which
+           keeps the block inside the bullet — numbered "1. lead…tail / 2. next",
+           and a reviewer reading the two side by side found step 3 was step 2. */
+        let started = false;
+        const pushItem = (html) => {
+          if (!html) return;
+          run.push(started ? { html, depth, cont: true } : { html, depth });
+          started = true;
+        };
+        let buf = [];
+        const flushBuf = () => {
+          if (!buf.length) return;
+          // A detached box so the buffered run can be flattened as a unit;
+          // flatten() takes a node, and these are loose siblings.
+          const box = li.ownerDocument.createElement('div');
+          for (const n of buf) box.appendChild(n.cloneNode(true));
+          buf = [];
+          pushItem(flatten(box, onNavy).trim());
+        };
+        for (const child of li.childNodes) {
+          if (child.nodeType !== 1) { buf.push(child); continue; }
+          if (ownedSet.has(child)) { flushBuf(); emitOwned(child); continue; }
+          const inner = owned.filter(o => child.contains(o));
+          if (!inner.length) { buf.push(child); continue; }
+          // A wrapper around one: its own text, then what it holds. Still in
+          // the wrapper's place in the item, which is the part that matters.
+          flushBuf();
+          pushItem(flatten(withoutNodes(child, inner), onNavy).trim());
+          for (const o of inner) emitOwned(o);
+        }
+        flushBuf();
       }
       flush();
       return out;
@@ -505,10 +584,25 @@ async function extractArticle(page, html) {
              away a rate table or a list wrapped in <figure> with a source line
              under it — ordinary article markup — while the packet kept it. The
              image is already gone, removed with the other media. */
-          const cap = el.querySelector('figcaption');
-          const rest = cap ? withoutNodes(el, [cap]) : el;
-          const inner = blocksOf(rest, onNavy);
-          return [...inner, ...(text(cap) ? [{ kind: 'disclaimer', html: inline(cap, onNavy) }] : [])];
+          const out = [];
+          for (const child of el.childNodes) {
+            if (child.nodeType === 3) {
+              const t = child.nodeValue.trim();
+              if (t) out.push({ kind: 'p', html: escHtml(t) });
+              continue;
+            }
+            if (child.nodeType !== 1) continue;
+            // In place, and only this figure's own caption: a descendant search
+            // found a NESTED figure's, and appending at the end reordered both.
+            if (child.tagName === 'FIGCAPTION') {
+              if (text(child)) out.push({ kind: 'disclaimer', html: inline(child, onNavy) });
+            } else if (BLOCK.has(child.tagName)) {
+              out.push(...blocksOfNode(child, onNavy));
+            } else if (text(child)) {
+              out.push({ kind: 'p', html: inlineNode(child, onNavy) });
+            }
+          }
+          return out;
         }
         default: {
           if (cls.contains('callout')) {
@@ -558,34 +652,50 @@ async function extractArticle(page, html) {
                renders as an ordinary list in document order, rather than being
                merged into the panel above the paragraph that introduced it. */
             const before = [], after = [], items = [];
+            /* The checklist as an ORDERED SEQUENCE of panel chunks and the heavy
+               blocks that interrupt them, rather than one panel plus a pile of
+               blocks below it. */
+            const panelSeq = [];
             let phase = 0;
             let heading = '';
             const pair = (nav, lite) => ({ nav, lite });
+            /* WHERE the label sat, not just that it existed. The hoist below
+               used to put it at the front unconditionally, so a box written
+               "<p>prose</p><span class=label>Sources</span><ul>" printed the
+               label ABOVE the prose in the email and below it in the packet.
+               null means "not in the prose that precedes the citations" — the
+               panel keeps it, which is where it already reads correctly. */
+            let labelPos = null;
             for (const part of parts) {
-              if (part.label) continue;
+              if (part.label) {
+                if (phase === 0) labelPos = before.length;
+                continue;
+              }
               if (part.list) {
-                const asItems = phase <= 1
-                  ? listBlocks(part.list, isAction, 0).flatMap(b => (b.kind === 'list' ? b.items : []))
-                  : [];
+                // Both grounds of the same list. listBlocks() decides structure
+                // from the markup alone, so the two sequences line up index for
+                // index; `|| b` is there so a future change that breaks that
+                // mis-colours a block rather than dropping it.
+                const navSeq = phase <= 1 ? listBlocks(part.list, isAction, 0) : [];
+                const asItems = navSeq.flatMap(b => (b.kind === 'list' ? b.items : []));
                 // An EMPTY <ul> is not the checklist. Letting it advance the
                 // phase demoted the real list below it to plain bullets and
                 // left an empty navy bar where the panel should have been.
                 if (phase <= 1 && asItems.length) {
                   phase = 1;
                   items.push(...asItems);
-                  /* Heavy blocks inside those items leave the panel, computed
-                     for the light ground rather than recoloured after.
-
-                     KNOWN LIMITATION: they are emitted after the whole
-                     checklist, not at the step they belong to, because the
-                     panel is one navy block. So a callout attached to step 1
-                     appears below step 2. Nothing is lost or duplicated, and
-                     splitting the panel to fix it would put two navy bars
-                     around the interruption — worth revisiting only if a real
-                     article starts doing this; none does today. */
-                  for (const b of listBlocks(part.list, false, 0)) {
-                    if (b.kind !== 'list') after.push(pair(b, b));
-                  }
+                  /* Heavy blocks inside those steps cannot sit on the navy
+                     ground, so they leave the panel — but AT THE STEP THEY
+                     BELONG TO, not below the whole checklist. A rate table in
+                     step 1 used to print under step 4, which is the one place
+                     a reader will not look for it. The panel resumes after the
+                     block; two navy bars around the interruption is the price,
+                     and it is cheaper than the table being in the wrong place. */
+                  const liteSeq = listBlocks(part.list, false, 0);
+                  navSeq.forEach((b, i) => {
+                    if (b.kind === 'list') panelSeq.push({ items: b.items });
+                    else panelSeq.push({ block: liteSeq[i] || b });
+                  });
                 } else {
                   for (const b of listBlocks(part.list, false, 0)) after.push(pair(b, b));
                 }
@@ -627,7 +737,12 @@ async function extractArticle(page, html) {
                its items. */
             const canLead = b => isAction &&
               ['p', 'disclaimer', 'h2', 'h3'].includes(b.kind);
-            const allLead = before.every(x => canLead(x.lite));
+            /* And only when the panel OPENS with steps. A checklist whose very
+               first step is a table starts with the table, so lead prose folded
+               into "the panel" would print below it; emitted as ordinary blocks
+               it stays where the article put it. */
+            const allLead = before.every(x => canLead(x.lite)) &&
+                            !(panelSeq[0] && panelSeq[0].block);
             const lead = [], leadOut = [];
             if (allLead) {
               for (const { nav } of before) {
@@ -649,19 +764,38 @@ async function extractArticle(page, html) {
                empty <ul> below the prose that introduced it. The fallback uses
                the LIGHT copies: `lead` is coloured for navy, so emitting it as
                ordinary paragraphs put cream and gold on white. */
-            /* The label sits above the prose in the article; the panel renders
-               it above the citations, which put it BELOW the prose that
-               introduces them. When there is prose in front, hoist the label to
-               where the article had it and leave the panel unlabelled. */
-            let srcLabel = text(label) || 'Sources';
-            if (!isAction && leadOut.length) {
-              leadOut.unshift({ kind: 'h3', text: srcLabel, html: '' });
+            /* The panel renders the label above the citations, which puts it
+               BELOW any prose that introduces them. When there is prose in
+               front, the label is emitted with that prose instead — at the
+               index the article put it, so the two artifacts read the same —
+               and the panel is left unlabelled.
+
+               `leadOut` is exactly `before` mapped to its light copies here
+               (a sources box can never lead a panel, so `allLead` is false
+               whenever `before` is non-empty), which is what makes an index
+               into one an index into the other. */
+            // Only if the article wrote one. Defaulting unconditionally put a
+            // "Sources" heading above a sources box that never had a label,
+            // and an empty one put a blank <h3> above its prose.
+            let srcLabel = label ? (text(label) || 'Sources') : '';
+            if (!isAction && leadOut.length && srcLabel) {
+              leadOut.splice(Math.min(labelPos ?? 0, leadOut.length), 0,
+                             { kind: 'h3', text: srcLabel, html: '' });
               srcLabel = '';
             }
+            /* Heading, lead and label belong to the FIRST chunk only — repeating
+               them over a split panel would read as two separate checklists. */
+            let first = true;
             const panel = items.length
-              ? [isAction
-                  ? { kind: 'action', heading, lead, items }
-                  : { kind: 'sources', label: srcLabel, items }]
+              ? panelSeq.flatMap((seg) => {
+                  if (seg.block) return [seg.block];
+                  if (!seg.items.length) return [];
+                  const head = first;
+                  first = false;
+                  return [isAction
+                    ? { kind: 'action', heading: head ? heading : '', lead: head ? lead : [], items: seg.items }
+                    : { kind: 'sources', label: head ? srcLabel : '', items: seg.items }];
+                })
               : [
                   ...(isAction && heading ? [{ kind: 'h3', text: heading, html: '' }] : []),
                   // srcLabel, not text(label): when the hoist above already
@@ -798,15 +932,20 @@ function buildEmailHtml(prs, generatedOn, att, fullCount = Infinity, printedPath
   // own kind of wrong answer.
   const headline  = counted ? `${plural(all.length + skipped.length, 'draft')} ready for review.`
                             : 'Drafts ready for review.';
-  const preheader = counted
-    ? `${plural(all.length, 'Ledger article')} drafted and waiting — the full text is below.`
-    : 'Ledger drafts are written and waiting — merging publishes them.';
   // What this body will actually print in full, which is not always what was
   // drafted: the size guard demotes later drafts to a listed entry, and some
   // may have failed to render. Saying "reproduced in full below" regardless
   // was a promise the message broke sixty kilobytes later.
   const inFull = Math.min(fullCount, all.length);
   const total = all.length + skipped.length;
+  // The intro sentence has always been honest about that; the preheader — the
+  // line Gmail shows in the inbox, before anything is opened — still promised
+  // "the full text is below" for all twenty-one when seven fitted.
+  const preheader = !counted
+    ? 'Ledger drafts are written and waiting — merging publishes them.'
+    : inFull >= total
+      ? `${plural(total, 'Ledger article')} drafted and waiting — the full text is below.`
+      : `${plural(total, 'Ledger article')} drafted and waiting — ${inFull} in full below, the rest in the PDF.`;
   const intro = !counted
     ? `${plural(prs.length, 'pull request')} drafted but not yet live on jparkassociates.com.
        Merging is what publishes the articles inside.`
@@ -1077,41 +1216,46 @@ function buildHtml(prs, generatedOn) {
 
   .draft-body .action-list { background:var(--navy-900); border-radius:3mm; padding:7mm; margin:6mm 0; break-inside:avoid; }
   .draft-body .action-list h2, .draft-body .action-list h3 { color:var(--gold-300); margin:0 0 3mm; font-size:11.5pt; }
-  /* Everything on the navy panel is cream, however deeply it is wrapped —
-     scoping these to direct children left prose one <div> down at 1.51:1.
-     The nested boxes below have their own white ground and are reset there. */
-  .draft-body .action-list p,
-  .draft-body .action-list li,
-  .draft-body .action-list td,
-  .draft-body .action-list th { color:rgba(245,240,232,.9); }
+  /* THE NAVY PANEL. Every text element on it, however deeply wrapped — five
+     separate invisible-text bugs have shipped from naming elements one at a
+     time and missing one. The universal selector is blunt, and it is scoped
+     to this panel. */
+  .draft-body .action-list, .draft-body .action-list * { color:rgba(245,240,232,.9); }
+  .draft-body .action-list strong,
+  .draft-body .action-list dt { color:var(--cream-50); font-weight:600; }
+  .draft-body .action-list a { color:var(--gold-300); }
+  .draft-body .action-list h1, .draft-body .action-list h2, .draft-body .action-list h3,
+  .draft-body .action-list h4, .draft-body .action-list h5, .draft-body .action-list h6 { color:var(--gold-300); }
   .draft-body .action-list ul { list-style:none; margin:0; }
   .draft-body .action-list li { position:relative; padding-left:6mm; margin-bottom:2mm; }
-  /* .draft-body strong is navy, and on this panel navy is the ground: the two
-     load-bearing figures of a real shipped checklist rendered at 1.00:1 —
-     blank gaps in the PDF — while the email printed them in cream. */
-  .draft-body .action-list strong { color:var(--cream-50); }
-  /* A .callout or .sources-box nested inside the panel keeps its own white
-     ground, so its text must go back to the body colours. */
-  .draft-body .action-list .callout p,
-  .draft-body .action-list .callout li,
-  .draft-body .action-list .sources-box p,
-  .draft-body .action-list .sources-box li,
-  .draft-body .action-list .callout td,
-  .draft-body .action-list .callout th,
-  .draft-body .action-list .sources-box td,
-  .draft-body .action-list .sources-box th { color:var(--slate-600); }
-  .draft-body .action-list .callout strong,
-  .draft-body .action-list .sources-box strong { color:var(--navy-900); }
-  .draft-body .action-list .callout li,
-  .draft-body .action-list .sources-box li { padding-left:0; }
-  .draft-body .action-list .callout ul,
-  .draft-body .action-list .sources-box ul { list-style:disc; margin:0 0 1.3em 1.2em; }
   .draft-body .action-list li::before { content:"\\2713"; position:absolute; left:0; top:0; font-family:var(--serif); font-weight:700; color:var(--gold-500); }
-  .draft-body .action-list .callout li::before,
-  .draft-body .action-list .sources-box li::before { content:none; }
-  .draft-body .action-list a { color:var(--gold-300); }
+
+  /* A .callout or .sources-box nested inside the panel is its own white box,
+     so everything in it goes back to the body colours. A sources box has no
+     background of its own — it is a rule and a label on the page ground — so
+     it needs one here, or the resets below paint navy text on the navy panel. */
+  .draft-body .action-list .callout,
+  .draft-body .action-list .sources-box {
+    background:var(--white); border-radius:3mm; padding:6mm; margin:6mm 0;
+  }
+  .draft-body .action-list .callout, .draft-body .action-list .callout *,
+  .draft-body .action-list .sources-box, .draft-body .action-list .sources-box * { color:var(--slate-600); }
+  .draft-body .action-list .callout strong, .draft-body .action-list .callout dt,
+  .draft-body .action-list .sources-box strong, .draft-body .action-list .sources-box dt { color:var(--navy-900); }
   .draft-body .action-list .callout a,
   .draft-body .action-list .sources-box a { color:var(--navy-700); }
+  .draft-body .action-list .callout h1, .draft-body .action-list .callout h2,
+  .draft-body .action-list .callout h3, .draft-body .action-list .callout h4,
+  .draft-body .action-list .sources-box h1, .draft-body .action-list .sources-box h2,
+  .draft-body .action-list .sources-box h3, .draft-body .action-list .sources-box h4 { color:var(--navy-900); }
+  .draft-body .action-list .callout .label { color:var(--gold-text); }
+  .draft-body .action-list .sources-box .label { color:var(--grey-500); }
+  .draft-body .action-list .callout li, .draft-body .action-list .sources-box li { padding-left:0; }
+  .draft-body .action-list .callout li::before,
+  .draft-body .action-list .sources-box li::before { content:none; }
+  .draft-body .action-list .callout ul,
+  .draft-body .action-list .sources-box ul { list-style:disc; margin:0 0 1.3em 1.2em; }
+
   /* The email bolds a <dt>; the packet's reset left it normal weight. */
   .draft-body dt { font-weight:600; color:var(--navy-900); }
 
