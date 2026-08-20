@@ -212,7 +212,9 @@ const listHtml = (items, ordered, start) => {
   const norm = items.map(i => (typeof i === 'string' ? { html: i, depth: 0 } : i));
   const tag = ordered ? 'ol' : 'ul';
   // `start` carried through, or the packet prints 5,6,7 and the email 1,2,3.
-  const from = ordered && start > 1 ? ` start="${Number(start)}"` : '';
+  // `!== 1`, not `> 1`: start="0" and negatives are real values the packet
+  // honours, and the two artifacts have to agree on what a step is called.
+  const from = ordered && Number.isFinite(start) && start !== 1 ? ` start="${Number(start)}"` : '';
   return `
       <${tag}${from} class="t-body" style="margin:0 0 16px;padding-left:22px;font:${BODY_FONT};color:${C.SLATE};">
         ${norm.map(i => `<li style="margin:0 0 7px;${i.depth ? `margin-left:${i.depth * 18}px;list-style-type:circle;` : ''}">${i.html}</li>`).join('')}
@@ -273,7 +275,7 @@ const flat = items => items.map(indent);
 const sourcesHtml = (label, items) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr>
       <td style="border-top:1px solid #e8e2d6;padding-top:14px;">
-        <p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label || 'Sources')}</p>
+        ${label ? `<p class="t-muted" style="margin:0 0 8px;font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:${C.GREY};">${esc(label)}</p>` : ''}
         <ul class="t-muted" style="margin:0;padding-left:20px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${C.GREY};word-break:break-word;">
           ${flat(items).map(i => `<li style="margin:0 0 5px;">${i}</li>`).join('')}
         </ul>

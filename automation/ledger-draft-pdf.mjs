@@ -144,7 +144,10 @@ async function extractArticle(page, html) {
       // out, produced no PDF, and shipped the article-free first-pass body.
       // Deterministic, so it repeated every Monday. No <img>, nothing to wait
       // for. <figcaption> is unaffected and still kept.
-      'img, picture, source, video, audio, canvas, svg, map, area')) {
+      'img, picture, source, video, audio, canvas, svg, map, area, ' +
+      // Hidden by the UA stylesheet, so the packet shows nothing while the
+      // email would print their contents in full.
+      'dialog, datalist, template, slot')) {
       el.remove();
     }
     // <details> renders collapsed, so its body is absent from innerText and the
@@ -166,7 +169,10 @@ async function extractArticle(page, html) {
        guessing which attribute paints next, keep only the ones this pipeline
        actually reads and drop everything else. */
     const KEEP_ATTR = new Set(['href', 'colspan', 'rowspan', 'class', 'datetime',
-                               'lang', 'dir', 'scope', 'rel', 'start', 'open']);
+                               'lang', 'dir', 'scope', 'rel', 'open',
+                               // List numbering: these change what a step is
+                               // called, not what colour it is.
+                               'start', 'type', 'value', 'reversed']);
     /* `class` needs an allowlist of its own. Keeping it wholesale handed the
        article the packet's own stylesheet: `<p class="cover-date">` paints
        cream at 55% opacity, which on the white draft ground measures 1.07:1 —
@@ -191,10 +197,6 @@ async function extractArticle(page, html) {
     for (const el of body.querySelectorAll('a[href]')) {
       try { el.setAttribute('href', new URL(el.getAttribute('href'), base).href); } catch { /* leave as-is */ }
     }
-    for (const el of body.querySelectorAll('img[src]')) {
-      try { el.setAttribute('src', new URL(el.getAttribute('src'), base).href); } catch { /* leave as-is */ }
-    }
-
     const txt = (sel, root = hero) => {
       const el = root && root.querySelector(sel);
       return el ? el.textContent.trim() : '';
@@ -265,7 +267,10 @@ async function extractArticle(page, html) {
        reviewer saw the words and lost the citation. Re-wrap instead. */
     const anchorWrap = (a, inner, onNavy) => {
       const href = escHtml(a.getAttribute('href') || '');
-      if (!href) return inner;
+      // An <a> around a <table> survives parsing with its own links inside it;
+      // wrapping again emits nested anchors, which are invalid and ambiguous in
+      // a mail client. Nothing to link is also nothing to emit.
+      if (!href || !inner.trim() || /<a\s/i.test(inner)) return inner;
       const link = onNavy ? P.GOLD_PILL : P.NAVY_900;
       return `<a class="t-link" href="${href}" style="color:${link};text-decoration:underline;">${inner}</a>`;
     };
@@ -282,9 +287,16 @@ async function extractArticle(page, html) {
        list item. Keeps links and emphasis, which a textContent fallback loses. */
     const flatten = (node, onNavy) => {
       let out = '';
-      const add = t => { if (t && t.trim()) out += (out && !/\s$/.test(out) ? ' ' : '') + t; };
+      // A separator only where the text on either side does not already have
+      // one, so nothing is glued and nothing is split.
+      const add = t => {
+        if (!t || !t.trim()) return;
+        out += (out && !/\s$/.test(out) && !/^\s/.test(t) ? ' ' : '') + t;
+      };
       for (const n of node.childNodes) {
-        if (n.nodeType === 3) { out += escHtml(n.nodeValue); continue; }
+        // Through add(), not appended raw: text that FOLLOWS a block child was
+        // glued to it — "<li>LEAD<div>MID</div>TAIL</li>" came out "MIDTAIL".
+        if (n.nodeType === 3) { add(escHtml(n.nodeValue)); continue; }
         if (n.nodeType !== 1) continue;
         // Descend into ANYTHING holding block content, not only into tags on
         // the BLOCK list. <span><p>…</p></span> and a table nested three deep
@@ -423,7 +435,9 @@ async function extractArticle(page, html) {
             ordered: list.tagName === 'OL',
             // The packet honours `start` and the email did not, so the same
             // list printed 5,6,7 in one artifact and 1,2,3 in the other.
-            start: Number(list.getAttribute('start')) || undefined,
+            // Number(), not `|| undefined`: start="0" is a real value.
+            start: list.hasAttribute('start') && Number.isFinite(Number(list.getAttribute('start')))
+              ? Number(list.getAttribute('start')) : undefined,
             items: run,
           });
         }
@@ -487,10 +501,14 @@ async function extractArticle(page, html) {
           return text(el) ? [{ kind: 'callout', label: '', blocks: [{ kind: 'p', html: inline(el, onNavy) }] }] : [];
         }
         case 'FIGURE': {
-          // The raster is dropped on purpose; the caption is not. A figcaption
-          // routinely carries the only statement of what a chart shows.
+          /* A figure is not only its caption. Emitting the caption alone threw
+             away a rate table or a list wrapped in <figure> with a source line
+             under it — ordinary article markup — while the packet kept it. The
+             image is already gone, removed with the other media. */
           const cap = el.querySelector('figcaption');
-          return text(cap) ? [{ kind: 'disclaimer', html: inline(cap, onNavy) }] : [];
+          const rest = cap ? withoutNodes(el, [cap]) : el;
+          const inner = blocksOf(rest, onNavy);
+          return [...inner, ...(text(cap) ? [{ kind: 'disclaimer', html: inline(cap, onNavy) }] : [])];
         }
         default: {
           if (cls.contains('callout')) {
@@ -555,8 +573,16 @@ async function extractArticle(page, html) {
                 if (phase <= 1 && asItems.length) {
                   phase = 1;
                   items.push(...asItems);
-                  // Heavy blocks inside those items leave the panel, so they are
-                  // computed for the light ground rather than recoloured after.
+                  /* Heavy blocks inside those items leave the panel, computed
+                     for the light ground rather than recoloured after.
+
+                     KNOWN LIMITATION: they are emitted after the whole
+                     checklist, not at the step they belong to, because the
+                     panel is one navy block. So a callout attached to step 1
+                     appears below step 2. Nothing is lost or duplicated, and
+                     splitting the panel to fix it would put two navy bars
+                     around the interruption — worth revisiting only if a real
+                     article starts doing this; none does today. */
                   for (const b of listBlocks(part.list, false, 0)) {
                     if (b.kind !== 'list') after.push(pair(b, b));
                   }
@@ -574,7 +600,10 @@ async function extractArticle(page, html) {
               }
               // Only before the checklist. A heading that follows the steps was
               // being hoisted above them.
-              if (isAction && !heading && phase === 0 && /^H[1-6]$/.test(part.el.tagName)) {
+              // Nothing before it, either: a heading that FOLLOWED the prose
+              // was still being printed above it.
+              if (isAction && !heading && phase === 0 && !before.length &&
+                  /^H[1-6]$/.test(part.el.tagName)) {
                 heading = text(part.el);
                 continue;
               }
@@ -620,13 +649,24 @@ async function extractArticle(page, html) {
                empty <ul> below the prose that introduced it. The fallback uses
                the LIGHT copies: `lead` is coloured for navy, so emitting it as
                ordinary paragraphs put cream and gold on white. */
+            /* The label sits above the prose in the article; the panel renders
+               it above the citations, which put it BELOW the prose that
+               introduces them. When there is prose in front, hoist the label to
+               where the article had it and leave the panel unlabelled. */
+            let srcLabel = text(label) || 'Sources';
+            if (!isAction && leadOut.length) {
+              leadOut.unshift({ kind: 'h3', text: srcLabel, html: '' });
+              srcLabel = '';
+            }
             const panel = items.length
               ? [isAction
                   ? { kind: 'action', heading, lead, items }
-                  : { kind: 'sources', label: text(label) || 'Sources', items }]
+                  : { kind: 'sources', label: srcLabel, items }]
               : [
                   ...(isAction && heading ? [{ kind: 'h3', text: heading, html: '' }] : []),
-                  ...(!isAction && text(label) ? [{ kind: 'h3', text: text(label), html: '' }] : []),
+                  // srcLabel, not text(label): when the hoist above already
+                  // placed it in leadOut, re-emitting here printed it twice.
+                  ...(!isAction && srcLabel ? [{ kind: 'h3', text: srcLabel, html: '' }] : []),
                   ...(allLead ? before.map(x => x.lite) : []),
                 ];
             return [...leadOut, ...panel, ...after.map(x => x.lite)];
@@ -674,7 +714,8 @@ async function extractArticle(page, html) {
           // in particular is live markup now that page scripting is disabled.
           if (node.tagName === 'A' && node.querySelector && node.querySelector(BLOCK_SEL)) {
             flush();
-            out.push({ kind: 'p', html: anchorWrap(node, flatten(node, onNavy), onNavy) });
+            const wrapped = anchorWrap(node, flatten(node, onNavy), onNavy);
+            if (wrapped.trim()) out.push({ kind: 'p', html: wrapped });
           } else if (node.querySelector && node.querySelector(BLOCK_SEL)) {
             flush();
             out.push(...blocksOf(node, onNavy));
@@ -1036,11 +1077,43 @@ function buildHtml(prs, generatedOn) {
 
   .draft-body .action-list { background:var(--navy-900); border-radius:3mm; padding:7mm; margin:6mm 0; break-inside:avoid; }
   .draft-body .action-list h2, .draft-body .action-list h3 { color:var(--gold-300); margin:0 0 3mm; font-size:11.5pt; }
-  .draft-body .action-list p { color:rgba(245,240,232,.9); }
+  /* Everything on the navy panel is cream, however deeply it is wrapped —
+     scoping these to direct children left prose one <div> down at 1.51:1.
+     The nested boxes below have their own white ground and are reset there. */
+  .draft-body .action-list p,
+  .draft-body .action-list li,
+  .draft-body .action-list td,
+  .draft-body .action-list th { color:rgba(245,240,232,.9); }
   .draft-body .action-list ul { list-style:none; margin:0; }
-  .draft-body .action-list li { position:relative; padding-left:6mm; color:rgba(245,240,232,.9); margin-bottom:2mm; }
+  .draft-body .action-list li { position:relative; padding-left:6mm; margin-bottom:2mm; }
+  /* .draft-body strong is navy, and on this panel navy is the ground: the two
+     load-bearing figures of a real shipped checklist rendered at 1.00:1 —
+     blank gaps in the PDF — while the email printed them in cream. */
+  .draft-body .action-list strong { color:var(--cream-50); }
+  /* A .callout or .sources-box nested inside the panel keeps its own white
+     ground, so its text must go back to the body colours. */
+  .draft-body .action-list .callout p,
+  .draft-body .action-list .callout li,
+  .draft-body .action-list .sources-box p,
+  .draft-body .action-list .sources-box li,
+  .draft-body .action-list .callout td,
+  .draft-body .action-list .callout th,
+  .draft-body .action-list .sources-box td,
+  .draft-body .action-list .sources-box th { color:var(--slate-600); }
+  .draft-body .action-list .callout strong,
+  .draft-body .action-list .sources-box strong { color:var(--navy-900); }
+  .draft-body .action-list .callout li,
+  .draft-body .action-list .sources-box li { padding-left:0; }
+  .draft-body .action-list .callout ul,
+  .draft-body .action-list .sources-box ul { list-style:disc; margin:0 0 1.3em 1.2em; }
   .draft-body .action-list li::before { content:"\\2713"; position:absolute; left:0; top:0; font-family:var(--serif); font-weight:700; color:var(--gold-500); }
+  .draft-body .action-list .callout li::before,
+  .draft-body .action-list .sources-box li::before { content:none; }
   .draft-body .action-list a { color:var(--gold-300); }
+  .draft-body .action-list .callout a,
+  .draft-body .action-list .sources-box a { color:var(--navy-700); }
+  /* The email bolds a <dt>; the packet's reset left it normal weight. */
+  .draft-body dt { font-weight:600; color:var(--navy-900); }
 
   .draft-body .sources-box { border-top:.75pt solid rgba(27,42,74,.16); margin-top:8mm; padding-top:4mm; }
   .draft-body .sources-box .label { color:var(--grey-500); }
@@ -1207,10 +1280,16 @@ async function main() {
     // networkidle0 times out and takes the whole packet with it. Wait for the
     // document, then give the fonts a bounded moment to settle — a packet in
     // fallback faces beats no packet at all.
-    // 'domcontentloaded', not 'load'. Nothing in the packet needs a subresource
-    // any more — images are stripped — and the webfonts have their own bounded
-    // race below. Waiting on 'load' meant one unreachable asset took the run.
-    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    /* 'load', but on a short leash. The only subresources left are the webfont
+       stylesheet and its font files — every image is stripped — so waiting is
+       what gets the packet set in Playfair and Inter rather than fallback
+       faces. 'domcontentloaded' does not wait at all, which made the font race
+       below a no-op and rendered the packet in fallbacks whenever the
+       stylesheet took more than a moment. Fifteen seconds, then carry on: the
+       content is parsed either way, and typography is not worth a stalled run. */
+    await page.setContent(html, { waitUntil: 'load', timeout: 15_000 })
+      .catch(() => console.log('::warning::Webfonts did not finish loading in 15s; ' +
+                               'the packet may render in fallback faces.'));
     /* The bound has to live in NODE, not in the page. With page scripting
        disabled the page's own setTimeout never fires, so the old in-page race
        had nothing racing: when document.fonts.ready did not settle it blocked
