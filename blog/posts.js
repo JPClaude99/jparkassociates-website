@@ -20,6 +20,16 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "fincen-ends-boi-reporting-california-llcs-2026",
+    title: "FinCEN permanently ends BOI reporting for California LLCs",
+    excerpt: "FinCEN's August 11 final rule permanently removes BOI reporting for U.S. companies and U.S. persons, effective August 14, 2026. It will also delete what you already filed — and the scam mail is still coming.",
+    date: "2026-08-24",
+    category: "compliance",
+    source: "FinCEN",
+    srcShort: "FinCEN",
+    readMins: 5
+  },
+  {
     slug: "september-15-2026-s-corp-partnership-deadline",
     title: "Extended S corp and partnership returns are due September 15, 2026",
     excerpt: "September 15 is the last stop for extended Form 1120-S and 1065 returns. The federal late penalty is $255 per owner per month — and California gives partnerships and LLCs until October 15.",
