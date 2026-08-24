@@ -104,32 +104,157 @@
   color: var(--gold-300);
 }
 
-/* ---------- Shared card art (pure CSS — no images for the pipeline) ---------- */
+/* ---------- Shared card art (pure CSS — no images for the pipeline) ----------
+   Three independent layers decide what a tile looks like. blog.js sets all
+   three as data-attributes; nothing here needs an image file.
+
+     data-cat   palette and shape language — the gradient, the corner radius
+                and the stroke weight of the two background shapes.
+     data-seed  placement, derived from the slug by hashSeed() in blog.js.
+                It only moves and resizes the shapes the category defined,
+                so two articles in one category never share a composition
+                and the category still reads as itself. Deterministic: a
+                given slug always lands on the same seed.
+     data-art   what sits in the middle — "stat" (a figure and its caption),
+                "motif" (a document fragment) or "word" (the source
+                wordmark, which is the fallback when an article carries
+                neither a figure nor a motif).
+   ---------------------------------------------------------------------- */
 .card-art {
   position: relative;
+  /* Placement defaults. Every data-seed block below overrides these; the
+     values here are what an unseeded tile falls back to. */
+  --a1w: 72%; --a1x: 0%; --a1y: 0%;
+  --a2w: 88%; --a2x: 0%; --a2y: 0%;
+  --spin: 0deg;
+  /* Shape defaults. The data-cat blocks override these. */
+  --ring-1: rgba(201, 168, 76, 0.55);
+  --ring-2: rgba(201, 168, 76, 0.18);
+  --ring-1-width: 2px;
+  --ring-2-width: 1px;
+  --ring-radius: 50%;
+  --ring-aspect: 1;
   background:
     radial-gradient(120% 130% at 18% 0%, rgba(46, 74, 122, 0.55) 0%, transparent 55%),
     linear-gradient(150deg, var(--navy-900) 0%, var(--navy-950) 100%);
   display: grid;
   place-items: center;
+  /* The chip (top left) and the source mark (bottom right) are absolutely
+     positioned over the tile. This padding keeps the centred content out
+     from under them — without it a tall motif slides beneath the chip at
+     grid-card width. The background geometry is unaffected. */
+  padding: 46px 14px 30px;
   overflow: hidden;
 }
 .card-art::before {
   content: "";
   position: absolute;
-  width: 72%;
-  aspect-ratio: 1;
-  border: 2px solid rgba(201, 168, 76, 0.55);
-  border-radius: 50%;
+  width: var(--a1w);
+  aspect-ratio: var(--ring-aspect);
+  border: var(--ring-1-width) solid var(--ring-1);
+  border-radius: var(--ring-radius);
+  transform: translate(var(--a1x), var(--a1y)) rotate(var(--spin));
 }
 .card-art::after {
   content: "";
   position: absolute;
-  width: 88%;
-  aspect-ratio: 1;
-  border: 1px solid rgba(201, 168, 76, 0.18);
-  border-radius: 50%;
+  width: var(--a2w);
+  aspect-ratio: var(--ring-aspect);
+  border: var(--ring-2-width) solid var(--ring-2);
+  border-radius: var(--ring-radius);
+  transform: translate(var(--a2x), var(--a2y)) rotate(var(--spin));
 }
+
+/* ---------- data-cat: palette and shape language ---------- */
+.card-art[data-cat="california"] {
+  background:
+    radial-gradient(120% 130% at 85% 100%, rgba(46, 74, 122, 0.55) 0%, transparent 55%),
+    linear-gradient(205deg, var(--navy-900) 0%, var(--navy-950) 100%);
+  --ring-2-width: 2px;
+  --ring-2: rgba(201, 168, 76, 0.35);
+}
+.card-art[data-cat="deadlines"] {
+  background:
+    radial-gradient(120% 130% at 50% -20%, rgba(46, 74, 122, 0.5) 0%, transparent 60%),
+    linear-gradient(180deg, var(--navy-900) 0%, var(--navy-950) 100%);
+  --ring-radius: 16px;
+  --ring-2-width: 1.5px;
+  --ring-2: rgba(201, 168, 76, 0.3);
+}
+.card-art[data-cat="compliance"] {
+  background:
+    radial-gradient(120% 130% at 100% 0%, rgba(46, 74, 122, 0.5) 0%, transparent 55%),
+    linear-gradient(120deg, var(--navy-950) 0%, var(--navy-900) 100%);
+  --ring-radius: 8px;
+  --ring-aspect: 0.78;
+  --ring-2-width: 1.5px;
+  --ring-2: rgba(201, 168, 76, 0.3);
+}
+.card-art[data-cat="payroll"] {
+  background:
+    radial-gradient(140% 120% at 0% 100%, rgba(46, 74, 122, 0.5) 0%, transparent 55%),
+    linear-gradient(30deg, var(--navy-900) 0%, var(--navy-950) 100%);
+}
+/* Payroll draws rules rather than rings. A 3px-tall box can't take a
+   percentage Y offset (3px * 22% is a quarter of a pixel), so the seed
+   varies these horizontally and the vertical split stays fixed. */
+.card-art[data-cat="payroll"]::before {
+  aspect-ratio: auto;
+  height: 3px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--ring-1);
+  transform: translate(var(--a1x), -1100%);
+}
+.card-art[data-cat="payroll"]::after {
+  aspect-ratio: auto;
+  height: 3px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--ring-2);
+  transform: translate(var(--a2x), 1100%);
+}
+.card-art[data-cat="industry"] {
+  background:
+    radial-gradient(120% 130% at 18% 100%, rgba(46, 74, 122, 0.55) 0%, transparent 55%),
+    linear-gradient(330deg, var(--navy-900) 0%, var(--navy-950) 100%);
+  --ring-2-width: 2px;
+  --ring-2: rgba(201, 168, 76, 0.32);
+}
+.card-art[data-cat="guides"] {
+  background:
+    radial-gradient(130% 120% at 50% 120%, rgba(46, 74, 122, 0.55) 0%, transparent 60%),
+    linear-gradient(0deg, var(--navy-900) 0%, var(--navy-950) 100%);
+  --ring-radius: 0;
+}
+/* Guides draw an open corner — two borders of a square, rotated 45°. The
+   rotation is the shape, so it replaces --spin rather than adding to it. */
+.card-art[data-cat="guides"]::before {
+  border-color: transparent transparent var(--ring-1) var(--ring-1);
+  transform: translate(var(--a1x), var(--a1y)) rotate(-45deg);
+}
+.card-art[data-cat="guides"]::after {
+  border-color: transparent transparent var(--ring-2) var(--ring-2);
+  transform: translate(var(--a2x), var(--a2y)) rotate(-45deg);
+}
+
+/* ---------- data-seed: placement (must stay after the data-cat blocks,
+     which is what lets a seed override a category's defaults) ---------- */
+.card-art[data-seed="0"] { --a1w: 72%; --a1x:   0%; --a1y:   0%; --a2w: 88%; --a2x:   0%; --a2y:   0%; --spin:   0deg; }
+.card-art[data-seed="1"] { --a1w: 54%; --a1x: -38%; --a1y:  22%; --a2w: 62%; --a2x:  34%; --a2y: -24%; --spin:   0deg; }
+.card-art[data-seed="2"] { --a1w: 44%; --a1x: -52%; --a1y: -30%; --a2w: 78%; --a2x:  22%; --a2y:  18%; --spin:   8deg; }
+.card-art[data-seed="3"] { --a1w: 64%; --a1x:  40%; --a1y: -34%; --a2w: 96%; --a2x: -24%; --a2y:  26%; --spin:  -6deg; }
+.card-art[data-seed="4"] { --a1w: 38%; --a1x:  58%; --a1y:  36%; --a2w: 84%; --a2x: -30%; --a2y: -18%; --spin:  12deg; }
+.card-art[data-seed="5"] { --a1w: 82%; --a1x: -16%; --a1y: -40%; --a2w: 52%; --a2x:  44%; --a2y:  30%; --spin: -10deg; }
+.card-art[data-seed="6"] { --a1w: 60%; --a1x:  26%; --a1y:  34%; --a2w: 92%; --a2x: -34%; --a2y: -22%; --spin:   5deg; }
+.card-art[data-seed="7"] { --a1w: 48%; --a1x: -30%; --a1y:  40%; --a2w: 70%; --a2x:  30%; --a2y: -36%; --spin: -14deg; }
+
+/* A figure or a document fragment is the subject of its tile; the geometry
+   drops back to a watermark so it sits behind rather than competing. */
+.card-art[data-art="stat"]  { --ring-1: rgba(201, 168, 76, 0.16); --ring-2: rgba(201, 168, 76, 0.09); }
+.card-art[data-art="motif"] { --ring-1: rgba(201, 168, 76, 0.13); --ring-2: rgba(201, 168, 76, 0.07); }
+
+/* ---------- data-art="word": the source wordmark (fallback) ---------- */
 .card-art .src {
   position: relative;
   z-index: 1;
@@ -139,61 +264,188 @@
   font-size: clamp(1.5rem, 2.6vw, 2.1rem);
   color: var(--gold-300);
   letter-spacing: 0.02em;
+  text-align: center;
+  padding: 0 18px;
+  line-height: 1.2;
 }
-/* Per-category compositions — same palette and monogram, but the geometry
-   shifts by category so the index doesn't read as one card repeated
-   seventeen times. Default (federal & anything unlisted): centered rings. */
-.card-art[data-cat="california"] {
-  background:
-    radial-gradient(120% 130% at 85% 100%, rgba(46, 74, 122, 0.55) 0%, transparent 55%),
-    linear-gradient(205deg, var(--navy-900) 0%, var(--navy-950) 100%);
-}
-.card-art[data-cat="california"]::before { width: 54%; transform: translate(-38%, 22%); }
-.card-art[data-cat="california"]::after { width: 62%; transform: translate(34%, -24%); border-width: 2px; border-color: rgba(201, 168, 76, 0.35); }
+/* Anything longer than a short abbreviation needs a step down or it wraps
+   into the chip. */
+.card-art .src.is-long { font-size: clamp(1.1rem, 1.9vw, 1.5rem); }
 
-.card-art[data-cat="deadlines"] {
-  background:
-    radial-gradient(120% 130% at 50% -20%, rgba(46, 74, 122, 0.5) 0%, transparent 60%),
-    linear-gradient(180deg, var(--navy-900) 0%, var(--navy-950) 100%);
+/* ---------- data-art="stat": the article's figure ---------- */
+.card-art .stat {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 0 16px;
 }
-.card-art[data-cat="deadlines"]::before { width: 40%; border-radius: 16px; transform: translate(-16%, -12%); }
-.card-art[data-cat="deadlines"]::after { width: 40%; border-radius: 16px; border-width: 1.5px; border-color: rgba(201, 168, 76, 0.3); transform: translate(16%, 12%); }
-
-.card-art[data-cat="compliance"] {
-  background:
-    radial-gradient(120% 130% at 100% 0%, rgba(46, 74, 122, 0.5) 0%, transparent 55%),
-    linear-gradient(120deg, var(--navy-950) 0%, var(--navy-900) 100%);
+.card-art .stat .fig {
+  display: block;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: clamp(1.9rem, 3.9vw, 2.85rem);
+  line-height: 1;
+  color: var(--gold-300);
+  letter-spacing: -0.012em;
+  font-variant-numeric: tabular-nums;
 }
-.card-art[data-cat="compliance"]::before { width: 34%; aspect-ratio: 0.78; border-radius: 8px; transform: translate(-10%, -4%) rotate(-5deg); }
-.card-art[data-cat="compliance"]::after { width: 34%; aspect-ratio: 0.78; border-radius: 8px; border-width: 1.5px; border-color: rgba(201, 168, 76, 0.3); transform: translate(14%, 6%) rotate(5deg); }
-
-.card-art[data-cat="payroll"] {
-  background:
-    radial-gradient(140% 120% at 0% 100%, rgba(46, 74, 122, 0.5) 0%, transparent 55%),
-    linear-gradient(30deg, var(--navy-900) 0%, var(--navy-950) 100%);
+.card-art .stat .fig.is-long { font-size: clamp(1.45rem, 2.9vw, 2.15rem); }
+.card-art .stat .fig .u {
+  font-size: 0.5em;
+  vertical-align: 0.52em;
+  margin-right: 0.03em;
+  color: var(--gold-500);
 }
-.card-art[data-cat="payroll"]::before { width: 52%; aspect-ratio: auto; height: 3px; border: 0; border-radius: 3px; background: rgba(201, 168, 76, 0.5); transform: translateY(-1100%); }
-.card-art[data-cat="payroll"]::after { width: 34%; aspect-ratio: auto; height: 3px; border: 0; border-radius: 3px; background: rgba(201, 168, 76, 0.25); transform: translate(-26%, 1100%); }
-
-.card-art[data-cat="industry"] {
-  background:
-    radial-gradient(120% 130% at 18% 100%, rgba(46, 74, 122, 0.55) 0%, transparent 55%),
-    linear-gradient(330deg, var(--navy-900) 0%, var(--navy-950) 100%);
+.card-art .stat .fig-label {
+  display: block;
+  margin-top: 10px;
+  font-family: var(--sans);
+  font-size: 0.585rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(245, 240, 232, 0.7);
+  line-height: 1.55;
 }
-.card-art[data-cat="industry"]::before { width: 52%; transform: translateX(-26%); }
-.card-art[data-cat="industry"]::after { width: 52%; border-width: 2px; border-color: rgba(201, 168, 76, 0.32); transform: translateX(26%); }
-
-.card-art[data-cat="guides"] {
-  background:
-    radial-gradient(130% 120% at 50% 120%, rgba(46, 74, 122, 0.55) 0%, transparent 60%),
-    linear-gradient(0deg, var(--navy-900) 0%, var(--navy-950) 100%);
+/* A hairline above the figure, echoing the rule under a total in a ledger. */
+.card-art[data-art="stat"] .stat::before {
+  content: "";
+  position: absolute;
+  left: -6%;
+  right: -6%;
+  top: -18px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201, 168, 76, 0.26) 22%, rgba(201, 168, 76, 0.26) 78%, transparent);
 }
-.card-art[data-cat="guides"]::before { border-color: transparent transparent rgba(201, 168, 76, 0.55) rgba(201, 168, 76, 0.55); transform: rotate(-45deg); }
-.card-art[data-cat="guides"]::after { border-color: transparent transparent rgba(201, 168, 76, 0.2) rgba(201, 168, 76, 0.2); transform: rotate(-45deg); }
 
+/* ---------- data-art="motif": a fragment of the document itself ---------- */
+.card-art .doc {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 64%;
+  max-width: 260px;
+  background:
+    linear-gradient(rgba(245, 240, 232, 0.05), rgba(245, 240, 232, 0.05)),
+    rgba(27, 42, 74, 0.78);
+  border: 1px solid rgba(201, 168, 76, 0.34);
+  border-radius: 3px;
+  padding: 10px 12px;
+}
+.card-art .doc-label {
+  display: block;
+  font-family: var(--sans);
+  font-size: 0.5rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgba(245, 240, 232, 0.55);
+  margin-bottom: 7px;
+  line-height: 1.4;
+}
+/* motif: form-boxes — a numbered row off a W-2 or 941, one box filled */
+.card-art .doc-boxes { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 5px; }
+.card-art .doc-boxes span {
+  height: 21px;
+  border: 1px solid rgba(245, 240, 232, 0.2);
+  border-radius: 2px;
+}
+.card-art .doc-boxes span.on {
+  border-color: var(--gold-500);
+  background: rgba(201, 168, 76, 0.16);
+  display: grid;
+  place-items: center;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--gold-300);
+}
+/* motif: lined-notice — an agency letter, optionally struck through */
+.card-art .doc-lines { margin-top: 9px; display: flex; flex-direction: column; gap: 5px; }
+.card-art .doc-lines i { height: 2px; border-radius: 2px; background: rgba(245, 240, 232, 0.14); }
+.card-art .doc-lines i:nth-child(2n) { width: 58%; }
+.card-art .doc-lines i.g { background: rgba(201, 168, 76, 0.55); width: 42%; }
+.card-art .doc-strike {
+  position: absolute;
+  left: -6%;
+  right: -6%;
+  top: 50%;
+  height: 2px;
+  background: rgba(201, 168, 76, 0.75);
+  transform: rotate(-9deg);
+}
+.card-art .doc-stamp {
+  position: absolute;
+  z-index: 2;
+  left: 14px;
+  bottom: 12px;
+  font-family: var(--sans);
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold-300);
+  border: 1px solid rgba(201, 168, 76, 0.6);
+  border-radius: 2px;
+  padding: 2px 6px;
+  transform: rotate(-4deg);
+}
+/* motif: calendar — a torn-off leaf, for anything with a due date */
+.card-art .doc.is-calendar { width: 52%; max-width: 168px; padding: 0; overflow: hidden; }
+.card-art .doc-cap {
+  display: block;
+  background: rgba(201, 168, 76, 0.2);
+  border-bottom: 1px solid rgba(201, 168, 76, 0.34);
+  font-family: var(--sans);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--gold-300);
+  text-align: center;
+  padding: 5px 4px;
+  white-space: nowrap;
+}
+.card-art .doc-day {
+  display: block;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 2.2rem;
+  line-height: 1;
+  color: var(--gold-300);
+  text-align: center;
+  padding: 11px 0 13px;
+  font-variant-numeric: tabular-nums;
+}
+/* motif: ledger-rows — line items over a ruled total, for a receipt,
+   a notice summary, or any this-vs-that comparison */
+.card-art .doc.is-rows { width: 68%; max-width: 240px; padding: 9px 11px; }
+.card-art .doc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--sans);
+  font-size: 0.5rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(245, 240, 232, 0.62);
+  padding: 2.5px 0;
+}
+/* The value column never wraps; the label wraps first if anything has to. */
+.card-art .doc-row b { white-space: nowrap; font-weight: 600; }
+.card-art .doc-row.total {
+  color: var(--gold-300);
+  border-top: 1px solid rgba(201, 168, 76, 0.4);
+  margin-top: 4px;
+  padding-top: 5px;
+}
+.card-art .doc-row.total b { font-family: var(--serif); font-weight: 700; font-size: 1.05em; }
+
+/* ---------- Chips and marks that sit over any of the three ---------- */
 .card-art .cat-chip {
   position: absolute;
-  z-index: 1;
+  z-index: 2;
   top: 14px; left: 14px;
   font-family: var(--sans);
   font-size: 0.68rem;
@@ -207,7 +459,20 @@
   padding: 5px 12px;
   backdrop-filter: blur(4px);
 }
-
+/* On a stat or motif tile the issuing agency moves out of the middle and
+   becomes a quiet corner mark — the .post-meta line under the card still
+   spells it out in full. */
+.card-art .src-mark {
+  position: absolute;
+  z-index: 2;
+  right: 14px; bottom: 12px;
+  font-family: var(--sans);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: rgba(224, 200, 126, 0.58);
+}
 /* ---------- Featured post ---------- */
 .blog-index { padding: clamp(50px, 6vw, 80px) clamp(20px, 5vw, 48px) clamp(80px, 10vw, 130px); }
 .featured-label {
@@ -240,7 +505,25 @@
 }
 .featured-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lift); border-color: var(--gold-500); }
 .featured-card .card-art { min-height: 320px; }
+/* The featured slot is roughly twice the width of a grid card, so every
+   piece of the artwork steps up with it. */
 .featured-card .card-art .src { font-size: clamp(2rem, 4vw, 3rem); }
+.featured-card .card-art .src.is-long { font-size: clamp(1.4rem, 2.6vw, 2rem); }
+.featured-card .card-art .stat .fig { font-size: clamp(2.6rem, 5vw, 4rem); }
+.featured-card .card-art .stat .fig.is-long { font-size: clamp(2rem, 3.8vw, 3rem); }
+.featured-card .card-art .stat .fig-label { font-size: 0.7rem; margin-top: 13px; }
+.featured-card .card-art[data-art="stat"] .stat::before { top: -24px; }
+.featured-card .card-art .doc { width: 56%; max-width: 430px; padding: 18px 22px; }
+.featured-card .card-art .doc-label { font-size: 0.72rem; margin-bottom: 13px; }
+.featured-card .card-art .doc-boxes span { height: 38px; }
+.featured-card .card-art .doc-boxes span.on { font-size: 1.3rem; }
+.featured-card .card-art .doc-lines i { height: 4px; }
+.featured-card .card-art .doc-stamp { font-size: 0.6rem; padding: 3px 9px; }
+.featured-card .card-art .doc.is-calendar { width: 34%; max-width: 240px; padding: 0; }
+.featured-card .card-art .doc-cap { font-size: 0.74rem; padding: 9px 8px; }
+.featured-card .card-art .doc-day { font-size: 3.8rem; padding: 20px 0 24px; }
+.featured-card .card-art .doc.is-rows { width: 44%; max-width: 360px; padding: 16px 19px; }
+.featured-card .card-art .doc-row { font-size: 0.72rem; padding: 5px 0; }
 .featured-card .body { padding: clamp(28px, 3.5vw, 48px); display: grid; align-content: center; gap: 14px; }
 .featured-card h2 {
   font-size: clamp(1.5rem, 2.8vw, 2.2rem);

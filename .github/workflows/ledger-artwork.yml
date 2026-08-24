@@ -1,0 +1,98 @@
+name: Ledger artwork
+
+# Keeps assets/ledger/<slug>.jpg — the per-article Open Graph share card —
+# in step with blog/posts.js.
+#
+# Every Ledger article's <meta property="og:image"> points at its own file
+# under assets/ledger/. Those files are generated, not hand-made, so the
+# only thing that has to be true is that one exists for every entry in the
+# manifest. This workflow is what makes that true without anyone having to
+# remember: posts.js lands on main, the cards are built, and whatever is
+# new gets committed straight back.
+#
+# It runs AFTER merge rather than inside the Ledger pull request on purpose.
+# The scan workflow's job is to write text — HTML, a manifest entry, a
+# sitemap line — and text is what a reviewer can actually review. Adding a
+# Chromium screenshot to that job would mean a npm install and a browser
+# launch standing between a drafted article and the review email, and a
+# flaky registry would then block publishing something whose artwork is
+# entirely cosmetic.
+#
+# The cost of that choice is a gap: for the minute or two between merge and
+# this run finishing, a brand-new article advertises a card that does not
+# exist yet. A crawler that unfurls the link inside that window gets no
+# image rather than the wrong one, and re-fetches later. Every article that
+# has been live for longer than one run has its card.
+#
+# ledger-art.mjs skips any card already on disk, so the normal run builds
+# only what is missing and finishes in seconds. Use the workflow_dispatch
+# below with rebuild_all when the card DESIGN changes — that is the only
+# time every file needs to be rewritten.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - blog/posts.js
+      - automation/ledger-art.mjs
+  workflow_dispatch:
+    inputs:
+      rebuild_all:
+        description: Rebuild every card, not just the missing ones
+        type: boolean
+        default: false
+
+permissions:
+  contents: write        # the whole point of the job is a commit
+
+# Serialised, never cancelled. Two runs racing would both see the same set
+# of missing cards, build them twice and collide on push; cancel-in-progress
+# would instead drop the artwork for whichever article merged second.
+concurrency:
+  group: ledger-artwork
+  cancel-in-progress: false
+
+jobs:
+  artwork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Not a repo dependency: the site has no build step and nothing here
+      # runs at page-serve time. Same pin as ledger-draft-alert.yml so both
+      # workflows fetch the same Chromium.
+      - name: Install puppeteer
+        run: npm install --no-save --no-audit --no-fund puppeteer@25
+
+      - name: Build the share cards
+        run: |
+          if [ "${{ inputs.rebuild_all }}" = "true" ]; then
+            node automation/ledger-art.mjs --force
+          else
+            node automation/ledger-art.mjs
+          fi
+
+      # `git diff --quiet` is the gate rather than counting files: a run that
+      # rebuilds byte-identical cards must not push an empty-ish commit, and
+      # the overwhelmingly common outcome — every card already on disk — is a
+      # clean no-op, not a failure.
+      - name: Commit whatever changed
+        run: |
+          if git diff --quiet -- assets/ledger; then
+            echo "Share cards already match the manifest — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "Ledger Bot"
+          git config user.email "actions@github.com"
+          git add assets/ledger
+          git commit -m "Ledger: rebuild share cards for blog/posts.js"
+          # Rebase before pushing: an article merging while Chromium was
+          # running would otherwise reject this push outright.
+          git pull --rebase origin main
+          git push origin HEAD:main

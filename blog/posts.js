@@ -15,8 +15,63 @@
      source    — issuing authority shown on the card
                  (e.g. "IRS", "CDTFA", "FinCEN", "EDD",
                   "J Park & Associates")
-     srcShort  — short form rendered inside the card artwork
+     srcShort  — short form of the source. On a tile that renders a
+                 figure or a motif it is the small mark in the bottom
+                 corner, so keep it to the agency ("IRS", "CDTFA").
+                 On a tile with neither — the fallback wordmark tile —
+                 it IS the artwork, so make it about the article, not
+                 the firm: "Tax map", "CP2000", "DIY or CPA". Never
+                 "JP&A" on an article that has something better to say.
+                 Roughly 10 characters is the ceiling either way.
      readMins  — integer, estimated reading time
+
+   Card artwork (all optional). blog.js picks the richest layer an
+   article supplies and falls back cleanly, so an entry with none of
+   these still renders — it just gets the wordmark tile. Every tile
+   also gets a composition derived from its slug, which needs no
+   fields at all. Prefer a figure; reach for a motif when the article
+   is about a specific document.
+
+     figure       — THE number the article turns on, as displayed:
+                    "$450", "63.4¢", "8027", "90 min". A leading $ and
+                    a trailing % or ¢ are set small and raised
+                    automatically. Keep it under ~8 characters; longer
+                    values step down a size rather than wrapping.
+     figureLabel  — the caption under it, in small caps. A short
+                    phrase, not a sentence: "Per location · not
+                    prorated".
+
+     art          — a document fragment instead of a figure. One of
+                    four motifs, each reading only its own fields:
+
+       { motif: "calendar", cap: "July 2026", day: "31" }
+           A torn-off leaf. For anything with a due date.
+
+       { motif: "form-boxes", label: "12  See instructions for box 12",
+         boxes: 4, fillIndex: 1, fill: "TT" }
+           A numbered row off a W-2 or 941 with one box filled.
+           boxes defaults to 4, fillIndex to 1.
+
+       { motif: "lined-notice", label: "Beneficial ownership — BOIR",
+         stamp: "Repealed" }
+           An agency letter. Supplying `stamp` also strikes it
+           through — use it when a rule is dead, not for emphasis.
+
+       { motif: "ledger-rows", label: "California sales tax",
+         rows: [["Hot food — dine-in", "Taxable"]],
+         total: ["The 80/80 rule", "Decides"] }
+           Line items over a ruled total. Doubles as a receipt, a
+           notice summary, or any this-vs-that comparison. Values can
+           be words as readily as numbers — do not invent dollar
+           amounts the article does not state.
+
+     An unknown motif name renders nothing and drops the tile to the
+     figure or wordmark layer, so a typo degrades rather than breaks.
+
+   Every entry also needs a share card at assets/ledger/<slug>.jpg for
+   its og:image. Those are generated — .github/workflows/ledger-artwork.yml
+   builds whatever is missing once posts.js lands on main. See
+   automation/ledger-art.mjs.
    ============================================================ */
 window.BLOG_POSTS = [
   {
@@ -27,7 +82,12 @@ window.BLOG_POSTS = [
     category: "compliance",
     source: "FinCEN",
     srcShort: "FinCEN",
-    readMins: 5
+    readMins: 5,
+    art: {
+      motif: "lined-notice",
+      label: "Beneficial ownership — BOIR",
+      stamp: "Repealed"
+    }
   },
   {
     slug: "september-15-2026-s-corp-partnership-deadline",
@@ -37,7 +97,8 @@ window.BLOG_POSTS = [
     category: "deadlines",
     source: "IRS / FTB",
     srcShort: "Sep 15",
-    readMins: 5
+    readMins: 5,
+    art: { motif: "calendar", cap: "September 2026", day: "15" }
   },
   {
     slug: "overtime-w2-box-12-code-tt-2026",
@@ -47,7 +108,14 @@ window.BLOG_POSTS = [
     category: "payroll",
     source: "IRS",
     srcShort: "IRS",
-    readMins: 5
+    readMins: 5,
+    art: {
+      motif: "form-boxes",
+      label: "12  See instructions for box 12",
+      boxes: 4,
+      fillIndex: 1,
+      fill: "TT"
+    }
   },
   {
     slug: "irs-automatic-penalty-relief-2026",
@@ -57,7 +125,17 @@ window.BLOG_POSTS = [
     category: "federal",
     source: "IRS",
     srcShort: "IRS",
-    readMins: 5
+    readMins: 5,
+    art: {
+      motif: "ledger-rows",
+      label: "Penalty relief — AEP",
+      rows: [
+        ["Late filing", "Waived"],
+        ["Late payment", "Waived"],
+        ["Payroll deposits", "Waived"]
+      ],
+      total: ["Clean years needed", "3"]
+    }
   },
   {
     slug: "july-31-2026-quarterly-tax-deadlines",
@@ -67,7 +145,8 @@ window.BLOG_POSTS = [
     category: "deadlines",
     source: "IRS / EDD / CDTFA",
     srcShort: "Jul 31",
-    readMins: 5
+    readMins: 5,
+    art: { motif: "calendar", cap: "July 2026", day: "31" }
   },
   {
     slug: "california-tobacco-retailer-license-fee-2026",
@@ -77,7 +156,9 @@ window.BLOG_POSTS = [
     category: "california",
     source: "CDTFA",
     srcShort: "CDTFA",
-    readMins: 5
+    readMins: 5,
+    figure: "$450",
+    figureLabel: "Per location · not prorated"
   },
   {
     slug: "la-county-minimum-wage-july-2026",
@@ -87,7 +168,9 @@ window.BLOG_POSTS = [
     category: "payroll",
     source: "Local Wage Law",
     srcShort: "Wages",
-    readMins: 5
+    readMins: 5,
+    figure: "$18.47",
+    figureLabel: "Unincorporated L.A. County"
   },
   {
     slug: "california-fuel-excise-tax-july-2026",
@@ -97,7 +180,9 @@ window.BLOG_POSTS = [
     category: "california",
     source: "CDTFA",
     srcShort: "CDTFA",
-    readMins: 4
+    readMins: 4,
+    figure: "63.4¢",
+    figureLabel: "Per gallon · gasoline"
   },
   {
     slug: "irs-ftb-notice-guide-la-crescenta",
@@ -106,7 +191,7 @@ window.BLOG_POSTS = [
     date: "2026-06-09",
     category: "guides",
     source: "J Park & Associates",
-    srcShort: "JP&A",
+    srcShort: "CP2000",
     readMins: 6
   },
   {
@@ -116,7 +201,7 @@ window.BLOG_POSTS = [
     date: "2026-06-04",
     category: "guides",
     source: "J Park & Associates",
-    srcShort: "JP&A",
+    srcShort: "Payroll",
     readMins: 6
   },
   {
@@ -126,7 +211,7 @@ window.BLOG_POSTS = [
     date: "2026-05-28",
     category: "guides",
     source: "J Park & Associates",
-    srcShort: "JP&A",
+    srcShort: "DIY or CPA",
     readMins: 6
   },
   {
@@ -137,7 +222,9 @@ window.BLOG_POSTS = [
     category: "guides",
     source: "J Park & Associates",
     srcShort: "JP&A",
-    readMins: 7
+    readMins: 7,
+    figure: "90 days",
+    figureLabel: "Financial setup, in order"
   },
   {
     slug: "tax-preparation-la-crescenta-checklist",
@@ -146,7 +233,7 @@ window.BLOG_POSTS = [
     date: "2026-05-12",
     category: "guides",
     source: "J Park & Associates",
-    srcShort: "JP&A",
+    srcShort: "Checklist",
     readMins: 6
   },
   {
@@ -157,7 +244,9 @@ window.BLOG_POSTS = [
     category: "guides",
     source: "J Park & Associates",
     srcShort: "JP&A",
-    readMins: 7
+    readMins: 7,
+    figure: "10",
+    figureLabel: "Questions before you sign"
   },
   {
     slug: "s-corp-vs-llc-california-taxes",
@@ -167,7 +256,9 @@ window.BLOG_POSTS = [
     category: "guides",
     source: "J Park & Associates",
     srcShort: "JP&A",
-    readMins: 7
+    readMins: 7,
+    figure: "$800",
+    figureLabel: "California's yearly minimum"
   },
   {
     slug: "la-crescenta-glendale-business-tax-map",
@@ -176,7 +267,7 @@ window.BLOG_POSTS = [
     date: "2026-06-10",
     category: "guides",
     source: "J Park & Associates",
-    srcShort: "JP&A",
+    srcShort: "Tax map",
     readMins: 6
   },
   {
@@ -187,7 +278,8 @@ window.BLOG_POSTS = [
     category: "deadlines",
     source: "IRS",
     srcShort: "IRS",
-    readMins: 5
+    readMins: 5,
+    art: { motif: "calendar", cap: "June 2026", day: "15" }
   },
   {
     slug: "mid-year-tax-planning-checklist",
@@ -197,7 +289,9 @@ window.BLOG_POSTS = [
     category: "federal",
     source: "J Park & Associates",
     srcShort: "JP&A",
-    readMins: 6
+    readMins: 6,
+    figure: "90 min",
+    figureLabel: "Prevents an April surprise"
   },
   {
     slug: "boi-reporting-2026-california-llcs",
@@ -206,7 +300,7 @@ window.BLOG_POSTS = [
     date: "2026-05-19",
     category: "compliance",
     source: "FinCEN",
-    srcShort: "FinCEN",
+    srcShort: "BOI",
     readMins: 5
   },
   {
@@ -217,7 +311,16 @@ window.BLOG_POSTS = [
     category: "california",
     source: "CDTFA",
     srcShort: "CDTFA",
-    readMins: 6
+    readMins: 6,
+    art: {
+      motif: "ledger-rows",
+      label: "California sales tax",
+      rows: [
+        ["Hot food — dine-in", "Taxable"],
+        ["Cold food — to go", "Depends"]
+      ],
+      total: ["The 80/80 rule", "Decides"]
+    }
   },
   {
     slug: "tip-reporting-restaurants-2026",
@@ -227,7 +330,9 @@ window.BLOG_POSTS = [
     category: "industry",
     source: "IRS",
     srcShort: "IRS",
-    readMins: 6
+    readMins: 6,
+    figure: "8027",
+    figureLabel: "The annual tip report"
   },
   {
     slug: "ca-payroll-2026-minimum-wage-sdi",
@@ -237,6 +342,8 @@ window.BLOG_POSTS = [
     category: "payroll",
     source: "EDD",
     srcShort: "EDD",
-    readMins: 5
+    readMins: 5,
+    figure: "$16.90",
+    figureLabel: "The statewide minimum wage"
   }
 ];
