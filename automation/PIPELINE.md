@@ -161,6 +161,30 @@ calibration. The rules they embody:
    `federal | california | compliance | payroll | deadlines | industry |
    guides` (`guides` = evergreen owner's guides, usually firm-authored, not
    announcement-driven).
+2b. **Give the card something to say.** The tile on the index is built from
+   the manifest entry, and the entry decides which of three layers it gets.
+   Pick the richest one the article actually supports — do not force it:
+
+   - **A figure.** Most announcement articles turn on one number. Set
+     `figure` to it as displayed (`"$450"`, `"63.4¢"`, `"8027"`) and
+     `figureLabel` to a short caption. This is the default; reach for it
+     first.
+   - **A motif.** When the article is about a specific document — a due
+     date, a W-2 box, an agency letter, a receipt — use `art` instead.
+     The four motifs and their fields are in the `posts.js` header.
+   - **Neither.** Then the tile falls back to `srcShort`, which becomes the
+     artwork. Make it about the article, not the firm: `"Tax map"`,
+     `"CP2000"`. **Never leave a new article rendering `"JP&A"`** — nine of
+     them once did, and the index read as one card printed nine times.
+
+   Placement varies by slug automatically, so two articles never share a
+   composition. That is not a reason to skip the above: unique-looking and
+   *about the article* are different things.
+
+   Do not invent figures. Every number on a tile has to appear in the
+   article, sourced. A `ledger-rows` motif takes words as readily as
+   amounts (`"Taxable"`, `"Waived"`) — use those rather than inventing a
+   dollar figure to fill the slot.
 3. Append a `<url>` entry for the article to `sitemap.xml` (`lastmod` = the
    publication date).
 4. **Bust the manifest cache.** `blog.html` loads the post manifest with a
@@ -171,12 +195,25 @@ calibration. The rules they embody:
    (e.g. `?v=3` → `?v=4`). Leave the unrelated `blog.js?v=` token alone unless
    you changed `blog.js`.
 
+### The share card is not your job
+
+`blog/_template.html` points `og:image` at
+`https://jparkassociates.com/assets/ledger/{{SLUG}}.jpg`, which does not exist
+when you open the pull request. That is expected. `ledger-artwork.yml` builds
+it from the manifest entry once the PR merges and commits it to `main` — see
+`automation/ledger-art.mjs`. Leave the meta tags exactly as the template has
+them and do not hand-make an image.
+
 ## Step 6 — QA checklist (do not skip)
 
 - [ ] No `{{` remains in the generated HTML.
 - [ ] `posts.js` still parses: run `node --check blog/posts.js` if node is
-      available, otherwise re-read the file — new entry has all 8 fields,
-      quotes/braces balanced, no trailing comma after the last entry.
+      available, otherwise re-read the file — new entry has all 8 required
+      fields, quotes/braces balanced, no trailing comma after the last entry.
+- [ ] The new entry carries card artwork (Step 5.2b): a `figure`, or an
+      `art` motif, or a `srcShort` that is about the article. An entry whose
+      tile would render `"JP&A"` or a bare agency name is not finished.
+- [ ] Every number on the tile appears in the article itself.
 - [ ] Every `<a href>` in the article points at the real page you fetched
       (fetch each once more to confirm it isn't a 404).
 - [ ] Date in `posts.js` matches `datetime` and the display date in the HTML.
