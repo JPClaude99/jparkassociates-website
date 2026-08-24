@@ -45,6 +45,29 @@ on:
 permissions:
   contents: write        # the whole point of the job is a commit
 
+# ── OPEN ITEM: this job pushes straight to `main` ──────────────────────────
+# That works today because `main` is unprotected. But the scan workflow's own
+# header recommends protecting it ("Recommended: protect `main` so nothing can
+# push to it directly"), and the day that recommendation is followed this
+# job's push is rejected and the run fails. Loudly — GitHub emails the repo
+# admin about a failed run — but it fails, and new articles stop getting
+# share cards.
+#
+# DECIDED 2026-08-24, by the repo owner: when `main` is protected, fix it by
+# EXEMPTING THE BOT — give this workflow a deploy key or a PAT that carries a
+# branch-protection bypass, and keep the direct push.
+#
+# The alternative considered and rejected was having this job open a small
+# auto-mergeable pull request instead of pushing. That never conflicts with
+# branch protection, but it puts a PR in the review queue for every published
+# article to deliver one generated JPEG, which is noise on a repo where the
+# `[Ledger]` PR is meant to be the thing a human reads.
+#
+# Nothing to do until protection is actually turned on. If you are here
+# because this job just failed with a rejected push, that is the trigger:
+# add the credential, do not rewrite the job.
+# ──────────────────────────────────────────────────────────────────────────
+
 # Serialised, never cancelled. Two runs racing would both see the same set
 # of missing cards, build them twice and collide on push; cancel-in-progress
 # would instead drop the artwork for whichever article merged second.
