@@ -101,19 +101,27 @@ jobs:
             node automation/ledger-art.mjs
           fi
 
-      # `git diff --quiet` is the gate rather than counting files: a run that
-      # rebuilds byte-identical cards must not push an empty-ish commit, and
-      # the overwhelmingly common outcome — every card already on disk — is a
-      # clean no-op, not a failure.
+      # The gate compares the INDEX to HEAD, not the worktree to HEAD, and so
+      # it stages first. That ordering is the whole point: a new article's card
+      # is an untracked file, and `git diff` does not look at untracked files —
+      # so gating on a bare `git diff --quiet` reported "nothing to commit" for
+      # exactly the case this workflow exists to handle, exited 0, and threw the
+      # freshly built card away on a green run. It went unnoticed because the
+      # only run before it was a card REDESIGN, which modifies tracked files,
+      # and those `git diff` sees fine.
+      #
+      # Staging first keeps the property the original gate wanted — a run that
+      # rebuilds byte-identical cards stages no change, so it still exits
+      # without an empty commit — while letting a brand-new card through.
       - name: Commit whatever changed
         run: |
-          if git diff --quiet -- assets/ledger; then
+          git add -A assets/ledger
+          if git diff --cached --quiet -- assets/ledger; then
             echo "Share cards already match the manifest — nothing to commit."
             exit 0
           fi
           git config user.name  "Ledger Bot"
           git config user.email "actions@github.com"
-          git add assets/ledger
           git commit -m "Ledger: rebuild share cards for blog/posts.js"
           # Rebase before pushing: an article merging while Chromium was
           # running would otherwise reject this push outright.
