@@ -75,6 +75,18 @@
    ============================================================ */
 window.BLOG_POSTS = [
   {
+    slug: "la-county-sales-tax-increase-october-2026",
+    title: "LA County sales tax rises to 10.25% on October 1, 2026",
+    excerpt: "Measure ER adds a half-cent to the countywide rate on October 1, taking unincorporated LA County from 9.75% to 10.25%. Your POS won't update itself \u2014 and your rate follows your street address, not your mailing city.",
+    date: "2026-08-26",
+    category: "california",
+    source: "LA County",
+    srcShort: "Measure ER",
+    readMins: 5,
+    figure: "10.25%",
+    figureLabel: "Unincorporated county \u00b7 from Oct 1"
+  },
+  {
     slug: "fincen-ends-boi-reporting-california-llcs-2026",
     title: "FinCEN permanently ends BOI reporting for California LLCs",
     excerpt: "FinCEN's August 11 final rule permanently removes BOI reporting for U.S. companies and U.S. persons, effective August 14, 2026. It will also delete what you already filed — and the scam mail is still coming.",
